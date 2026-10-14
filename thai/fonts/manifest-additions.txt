@@ -1,0 +1,4 @@
+TH Sarabun PSK | Regular | fonts/th-sarabun-psk/THSarabunPSK-Regular.ttf | Thai | OFL-1.1 | fonts/th-sarabun-psk/OFL.txt | 0642bd7723fc8538ad3ce7f0bf206de3424cc95f9aee8b563218506cfb00ca4a | https://github.com/SarabunConsortium/TH-Sarabun-PSK
+TH Sarabun PSK | Bold | fonts/th-sarabun-psk/THSarabunPSK-Bold.ttf | Docu | OFL-1.1 | fonts/th-sarabun-psk/OFL.txt | 7f90121592df490af8ee98f1b34dafa4c3d2804134e6cecae5a51c696683e0cb | https://github.com/SarabunConsortium/TH-Sarabun-PSK
+TH Sarabun PSK | Italic | fonts/th-sarabun-psk/THSarabunPSK-Italic.ttf | Docu | OFL-1.1 | fonts/th-sarabun-psk/OFL.txt | 217f777dd36c57bbb1aa7ea77bed312cf12989b39629e98f3a85a704b82e45e5 | https://github.com/SarabunConsortium/TH-Sarabun-PSK
+TH Sarabun PSK | Bold Italic | fonts/th-sarabun-psk/THSarabunPSK-BoldItalic.ttf | Docu | OFL-1.1 | fonts/th-sarabun-psk/OFL.txt | 99dc2adaf9df7b63686c9e63208bb7635397f1c0ad9c71d94783292e2ef10890 | https://github.com/SarabunConsortium/TH-Sarabun-PSK
