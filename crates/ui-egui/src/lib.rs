@@ -828,7 +828,9 @@ impl PdfCraftApp {
             scroll_speed: scroll_speed::ScrollSpeed::default(),
             animation_effects: motion::AnimationEffects::default(),
             motion: motion::Motion::default(),
-            language: i18n::AUTO.to_string(),
+            // Thai edition: a first launch opens in Thai whatever the system locale; Preferences ›
+            // Language still offers every language and "auto".
+            language: if cfg!(test) { i18n::AUTO } else { "th" }.to_string(),
             ui_scale: None,
             system_text_scale: 1.0,
             ui_scale_applied: None,
