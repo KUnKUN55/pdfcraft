@@ -4,7 +4,7 @@ PdfCraft ฉบับปรับปรุงให้ใช้งานภา�
 **ฉบับนี้ไม่ใช่ฉบับทางการ** และไม่ได้อยู่ในความดูแลของผู้พัฒนา PdfCraft หากพบปัญหาในฉบับนี้ โปรดแจ้งที่ Issues ของ repository นี้ ไม่ใช่ที่โปรเจกต์ต้นฉบับ
 
 > English: an unofficial Thai edition of PdfCraft (Thai UI, Thai text editing, TH Sarabun PSK and
-> installed-font support). Based on upstream commit `87b448b`. Not affiliated with or endorsed by
+> installed-font support). Based on upstream release v0.7.1. Not affiliated with or endorsed by
 > the PdfCraft authors.
 
 ## มีอะไรเพิ่มจากต้นฉบับ
