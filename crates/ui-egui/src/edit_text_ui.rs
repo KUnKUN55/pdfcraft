@@ -255,6 +255,9 @@ fn source_look(base_font: &str, size: f64, color: [f64; 3], detected_bold: bool,
     } else {
         F::Helvetica
     };
+    // The font itself, when this build or this machine has it: the menu then names it, and text
+    // typed in it previews in its own face.
+    let family = F::like_font(base_font).unwrap_or(family);
     pdfcraft_engine::AddedText {
         family,
         bold: detected_bold || ["bold", "black", "heavy", "semibold", "demi"].iter().any(|s| name.contains(s)),
@@ -269,7 +272,11 @@ fn look_of(b: &pdfcraft_engine::TextBlock) -> pdfcraft_engine::AddedText {
     source_look(&b.base_font, b.size, b.color, b.bold, b.italic)
 }
 
-fn editor_font(look: &pdfcraft_engine::AddedText, size: f32) -> FontId {
+fn editor_font(ctx: &egui::Context, look: &pdfcraft_engine::AddedText, size: f32) -> FontId {
+    // A craft-fonts or installed family is shown in its own face, as it will be saved.
+    if look.family.craft(look.bold, look.italic).is_some() {
+        return crate::theme::document_font(ctx, look.family, look.bold, look.italic, size);
+    }
     let family = match (look.family, look.bold) {
         (pdfcraft_engine::FontFamily::Courier, _) => FontFamily::Monospace,
         (_, true) => FontFamily::Name("semibold".into()),
@@ -790,11 +797,22 @@ pub(crate) fn install_source_fonts(ctx: &egui::Context, doc: &pdfcraft_engine::D
     families
 }
 
+/// The editor's look, with the font the pointer rests on in the font menu standing in for its
+/// family: a preview, nothing is applied until the font is clicked.
+fn shown_look(ctx: &egui::Context, ed: &LineEditor) -> pdfcraft_engine::AddedText {
+    let mut look = ed.look.clone();
+    if let Some(family) = crate::content_ui::previewed_family(ctx) {
+        look.family = family;
+    }
+    look
+}
+
 fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
+    let ed_look = shown_look(ui.ctx(), ed);
     // An unchanged PDF row already has an authoritative line break. Do not rewrap it
     // because font rounding or a fallback face measures a fraction of a pixel wider.
-    job.wrap.max_width = if text == ed.original && ed.look == ed.look0 && ed.extras == ed.extras0 { f32::INFINITY } else { width };
+    job.wrap.max_width = if text == ed.original && ed_look == ed.look0 && ed.extras == ed.extras0 { f32::INFINITY } else { width };
     if let Some((block, lines)) = &ed.source {
         let lefts: Vec<_> = block.rows.iter().filter_map(|r| r.first().and_then(|i| lines.get(*i)).map(|l| l.rect[0])).collect();
         let left_span = lefts.iter().copied().fold(f64::NEG_INFINITY, f64::max) - lefts.iter().copied().fold(f64::INFINITY, f64::min);
@@ -815,23 +833,24 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
             let Some(line) = lines.get(index) else { continue };
             let mut look = source_look(&line.base_font, line.size, line.color, line.bold, line.italic);
             look.size = line.size;
-            if ed.look.family != ed.look0.family {
-                look.family = ed.look.family;
+            if ed_look.family != ed.look0.family {
+                look.family = ed_look.family;
             }
-            if ed.look.bold != ed.look0.bold {
-                look.bold = ed.look.bold;
+            if ed_look.bold != ed.look0.bold {
+                look.bold = ed_look.bold;
             }
-            if ed.look.italic != ed.look0.italic {
-                look.italic = ed.look.italic;
+            if ed_look.italic != ed.look0.italic {
+                look.italic = ed_look.italic;
             }
-            if ed.look.color != ed.look0.color {
-                look.color = ed.look.color;
+            if ed_look.color != ed.look0.color {
+                look.color = ed_look.color;
             }
-            if ed.look.size != ed.look0.size {
-                look.size = ed.look.size;
+            if ed_look.size != ed.look0.size {
+                look.size = ed_look.size;
             }
-            let mut font = editor_font(&look, (look.size as f32 * scale).clamp(1.0, 300.0));
-            let original_face = ed.look.family == ed.look0.family && ed.look.bold == ed.look0.bold && ed.look.italic == ed.look0.italic;
+            let mut font = editor_font(ui.ctx(), &look, (look.size as f32 * scale).clamp(1.0, 300.0));
+            let own_face = look.family.craft(look.bold, look.italic).is_some();
+            let original_face = ed_look.family == ed.look0.family && ed_look.bold == ed.look0.bold && ed_look.italic == ed.look0.italic;
             let embedded = original_face && ed.fonts.contains_key(&line.font);
             if embedded && let Some(name) = ed.fonts.get(&line.font) {
                 font.family = FontFamily::Name(name.clone().into());
@@ -846,7 +865,7 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
                     font_id: font,
                     extra_letter_spacing: spacing + ed.extras.char_spacing as f32 * scale,
                     color: color32(look.color),
-                    italics: look.italic && !embedded,
+                    italics: look.italic && !embedded && !own_face,
                     ..Default::default()
                 },
             );
@@ -856,9 +875,9 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
             text,
             0.0,
             egui::TextFormat {
-                font_id: editor_font(&ed.look, ed.size),
-                color: color32(ed.look.color),
-                italics: ed.look.italic,
+                font_id: editor_font(ui.ctx(), &ed_look, ed.size),
+                color: color32(ed_look.color),
+                italics: ed_look.italic && ed_look.family.craft(ed_look.bold, ed_look.italic).is_none(),
                 ..Default::default()
             },
         );
@@ -967,7 +986,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     ed.max_width = ed.rect.width();
     let scale = (ed.rect.width() / (ed.source_rect[2] - ed.source_rect[0]).abs().max(0.01)).max(0.01);
     ed.size = (ed.look.size as f32 * scale).clamp(1.0, 300.0);
-    let font = editor_font(&ed.look, ed.size);
+    let font = editor_font(ctx, &shown_look(ctx, ed), ed.size);
     let text_color = color32(ed.look.color);
     let mut done = None;
     egui::Area::new(egui::Id::new("edit-text-line")).order(egui::Order::Foreground).fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top())).show(

@@ -71,8 +71,11 @@ pub fn ui_thai_fonts() -> Vec<&'static CraftFont> {
     CRAFT_FONTS.iter().filter(|f| f.covers("Thai")).collect()
 }
 
+/// The face for Thai text written into PDFs: TH Sarabun PSK when the build input has it, else
+/// the first `Thai` face. The interface keeps manifest order (Noto Sans Thai first).
 pub fn document_thai_font() -> Option<&'static CraftFont> {
-    ui_thai_fonts().into_iter().next()
+    let faces = ui_thai_fonts();
+    faces.iter().copied().find(|f| f.family == "TH Sarabun PSK").or_else(|| faces.into_iter().next())
 }
 
 /// The `Hebr` craft-fonts faces for Hebrew interface text (file names, document titles, text

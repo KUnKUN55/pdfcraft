@@ -37,10 +37,23 @@ fn style(a: &Args, t: &mut AddedText) -> Result<()> {
     }
     if let Some(f) = a.opt_str("font")? {
         t.family = match f.to_ascii_lowercase().as_str() {
-            "helvetica" | "sans" | "arial" => FontFamily::Helvetica,
+            "helvetica" | "sans" => FontFamily::Helvetica,
+            // The installed Arial when there is one, else its standard look-alike as before.
+            "arial" => FontFamily::from_name("Arial").unwrap_or(FontFamily::Helvetica),
+            // A way to see what this machine offers.
+            "?" => {
+                let names: Vec<String> = FontFamily::installed()
+                    .into_iter()
+                    .map(|f| if f.has_thai() { format!("{} [TH]", f.label()) } else { f.label().to_string() })
+                    .collect();
+                return Err(bad(format!("installed fonts ({}): {}", names.len(), names.join(" | "))));
+            }
             "times" | "serif" => FontFamily::Times,
             "courier" | "mono" | "monospace" => FontFamily::Courier,
-            other => return Err(bad(format!("unknown font {other:?} (helvetica, times, courier)"))),
+            "sarabun" | "thsarabunpsk" if FontFamily::Sarabun.craft(false, false).is_some() => FontFamily::Sarabun,
+            // A bundled family's full name, or a font installed on this machine.
+            other => FontFamily::from_name(other)
+                .ok_or_else(|| bad(format!("unknown font {other:?} (helvetica, times, courier, sarabun, or an installed font's family name)")))?,
         };
     }
     if let Some(b) = a.opt_bool("bold")? {

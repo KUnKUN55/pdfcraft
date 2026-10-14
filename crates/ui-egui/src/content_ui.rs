@@ -68,6 +68,9 @@ pub struct TextDraft {
     pub text: String,
     pub style: AddedText,
     pub focus: bool,
+    /// The box hugs the text: new text, and retyped text whose box didn't wrap it. A box made
+    /// narrow enough to wrap keeps its width.
+    pub auto: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -219,7 +222,7 @@ pub(crate) fn page_input(
             }
             // A click elsewhere keeps the text being typed and starts a new box (#74). The click
             // can reach the page before the editor sees it lose focus, so finish it here.
-            let typed = cv.draft.take().and_then(|d| finish(cv, d, added));
+            let typed = cv.draft.take().and_then(|d| finish(cv, d, added, info));
             // The Format panel styles the new text, not the box just kept.
             (cv.selected, cv.select_added) = (None, None);
             let at = to_display(xf, info, page, p);
@@ -232,6 +235,7 @@ pub(crate) fn page_input(
                 text: String::new(),
                 style,
                 focus: true,
+                auto: true,
             });
             consumed = true;
             if typed.is_some() {
@@ -264,7 +268,8 @@ pub(crate) fn page_input(
         if cv.hold_blocked() {
             return true;
         }
-        cv.draft = Some(TextDraft { page, index: Some(i), rect: t.rect, text: t.text.clone(), style: t.clone(), focus: true });
+        let auto = !pdfcraft_engine::text_is_wrapped(t);
+        cv.draft = Some(TextDraft { page, index: Some(i), rect: t.rect, text: t.text.clone(), style: t.clone(), focus: true, auto });
         cv.selected = Some((page, i));
         consumed = true;
         return consumed;
@@ -298,6 +303,14 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
         {
             r = dragged(r, g, p - start, matches!(a.content, AddedContent::Image(_)));
         }
+        if selected
+            && cv.grab.is_none()
+            && cv.draft.is_none()
+            && let AddedContent::Text(t) = &a.content
+            && let Some(previewed) = paint_family_preview(ui, painter, xf, page, info, t)
+        {
+            r = previewed;
+        }
         if selected {
             painter.rect_stroke(r.expand(1.0), CornerRadius::ZERO, Stroke::new(1.5, SELECT_BLUE), egui::StrokeKind::Outside);
             for (c, ..) in handles(r.expand(1.0)) {
@@ -309,8 +322,8 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
     }
 }
 
-/// Delete removes the selected item; Escape clears the selection.
-pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView) {
+/// Delete removes the selected item; Escape clears the selection; the arrow keys move it.
+pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
     if view.content.selected.is_none() || view.content.draft.is_some() || ctx.egui_wants_keyboard_input() {
         return;
     }
@@ -319,7 +332,37 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView) {
         view.pending_edit = Some(Edit::DeleteContent { page, index });
     } else if esc {
         view.content.selected = None;
+    } else if let Some([dx, dy]) = nudge(ctx)
+        && view.pending_edit.is_none()
+        && let Some((page, index)) = view.content.selected
+        && let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index)
+    {
+        // Display space: y grows up the page.
+        let r = a.content.rect();
+        let content = a.content.with_rect([r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]);
+        view.pending_edit = Some(Edit::UpdateContent { page, index, content });
     }
+}
+
+/// Whether the arrow keys move the selected added item (the page keeps still meanwhile).
+pub(crate) fn arrows_nudge(view: &DocView) -> bool {
+    view.content.selected.is_some() && view.content.draft.is_none()
+}
+
+/// How far the arrow keys pressed this frame move the selected item, in points: one point a
+/// press, ten with Shift. Each press is one undo step.
+fn nudge(ctx: &egui::Context) -> Option<[f64; 2]> {
+    use egui::Key;
+    ctx.input(|i| {
+        if i.modifiers.command || i.modifiers.alt {
+            return None;
+        }
+        let step = if i.modifiers.shift { 10.0 } else { 1.0 };
+        let count = |k| i.num_presses(k) as f64;
+        let dx = (count(Key::ArrowRight) - count(Key::ArrowLeft)) * step;
+        let dy = (count(Key::ArrowUp) - count(Key::ArrowDown)) * step;
+        (dx != 0.0 || dy != 0.0).then_some([dx, dy])
+    })
 }
 
 /// After an add: select the new item.
@@ -353,12 +396,20 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
         // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
         ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
         let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+        let font = crate::theme::document_font(ui.ctx(), t.style.family, t.style.bold, t.style.italic, (t.style.size as f32 * zoom).max(8.0));
+        // A box that hugs its text grows as it is typed, as far as the page's right edge.
+        let width = if t.auto {
+            let typed = ui.painter().layout_no_wrap(t.text.clone(), font.clone(), Color32::BLACK).size().x;
+            (typed + 16.0).clamp(60.0, (xf.rect.right() - r.left()).max(60.0))
+        } else {
+            r.width().max(60.0)
+        };
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let resp = ui.add(
                 egui::TextEdit::multiline(&mut t.text)
-                    .font(egui::FontId::proportional((t.style.size as f32 * zoom).max(8.0)))
-                    .desired_width(r.width().max(60.0))
+                    .font(font)
+                    .desired_width(width)
                     .desired_rows(1)
                     .background_color(Color32::from_rgba_unmultiplied(255, 255, 255, 235))
                     .text_color(Color32::from_rgb(cr, cg, cb))
@@ -402,46 +453,234 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     if !commit || undrawable.is_some() {
         return (None, false);
     }
-    let edit = view.content.draft.take().and_then(|d| finish(&mut view.content, d, added));
+    let edit = view.content.draft.take().and_then(|d| finish(&mut view.content, d, added, info));
     (edit, done)
 }
 
 /// A finished draft as an edit: new text is added (and selected once it exists), retyped text
 /// updated, and text emptied by retyping removed. Empty new text adds nothing.
-fn finish(cv: &mut ContentView, d: TextDraft, added: &[Added]) -> Option<Edit> {
+fn finish(cv: &mut ContentView, d: TextDraft, added: &[Added], info: &DocInfo) -> Option<Edit> {
     let text = d.text.trim_end().to_string();
+    // A box that hugs its text is refitted to what was typed.
+    let fit = |t: AddedText| match info.pages.get(d.page) {
+        Some(p) if d.auto => pdfcraft_engine::fitted_text(&t, p.width as f64),
+        _ => t,
+    };
     match d.index {
         None if text.trim().is_empty() => None,
         None => {
             cv.select_added = Some((d.page, on_page(added, d.page).len()));
-            Some(Edit::AddText { page: d.page, text: AddedText { rect: d.rect, text, ..d.style } })
+            Some(Edit::AddText { page: d.page, text: fit(AddedText { rect: d.rect, text, ..d.style }) })
         }
         Some(i) if text.trim().is_empty() => Some(Edit::DeleteContent { page: d.page, index: i }),
         Some(i) => {
             let (_, a) = on_page(added, d.page).into_iter().find(|(k, _)| *k == i)?;
             let AddedContent::Text(old) = &a.content else { return None };
-            (old.text != text).then(|| Edit::UpdateContent { page: d.page, index: i, content: AddedContent::Text(AddedText { text, ..old.clone() }) })
+            (old.text != text).then(|| Edit::UpdateContent { page: d.page, index: i, content: AddedContent::Text(fit(AddedText { text, ..old.clone() })) })
         }
     }
+}
+
+/// A restyled item: one whose box hugged its text is refitted to the new font or size.
+pub(crate) fn restyled(old: &AddedText, new: AddedText, page_width: Option<f64>) -> AddedText {
+    match page_width {
+        Some(w) if !pdfcraft_engine::text_is_wrapped(old) => pdfcraft_engine::fitted_text(&new, w),
+        _ => new,
+    }
+}
+
+/// The Add text font menu: the bundled families, then the fonts installed on this machine, with
+/// a box to search them by name.
+fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
+    let search_id = ui.make_persistent_id("font-family-search");
+    egui::ComboBox::from_id_salt("font-family")
+        .selected_text(family.label())
+        .width(130.0)
+        .height(360.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show_ui(ui, |ui| {
+            ui.set_min_width(240.0);
+            // Opening the menu starts a new search with the caret in the box, so the font's name
+            // can be typed straight away.
+            let now = ui.input(|i| i.time);
+            let seen_id = search_id.with("seen");
+            let opened = ui.data(|d| d.get_temp::<f64>(seen_id)).is_none_or(|seen| now - seen > 0.3);
+            ui.data_mut(|d| d.insert_temp(seen_id, now));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            let mut query: String = if opened { String::new() } else { ui.data(|d| d.get_temp(search_id)).unwrap_or_default() };
+            let search = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tl!("Search")).desired_width(f32::INFINITY));
+            if opened {
+                search.request_focus();
+            }
+            // Enter takes the first font the search leaves.
+            let entered = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let want = query.trim().to_lowercase();
+            ui.data_mut(|d| d.insert_temp(search_id, query));
+            let mut hovered = None;
+            let mut first = None;
+            let mark = ui.visuals().weak_text_color();
+            let mut offer = |ui: &mut egui::Ui, f: FontFamily| {
+                if !(want.is_empty() || f.label().to_lowercase().contains(&want)) {
+                    return;
+                }
+                first.get_or_insert(f);
+                let resp = ui.selectable_label(*family == f, f.label());
+                // A small mark on the fonts that have Thai letters of their own.
+                if f.has_thai() {
+                    let at = Pos2::new(ui.max_rect().right() - 6.0, resp.rect.center().y);
+                    ui.painter().text(at, egui::Align2::RIGHT_CENTER, "TH", egui::FontId::proportional(9.0), mark);
+                }
+                if resp.hovered() {
+                    hovered = Some(f);
+                }
+                if resp.clicked() {
+                    *family = f;
+                    ui.close();
+                }
+            };
+            for f in FontFamily::bundled() {
+                offer(ui, f);
+            }
+            ui.separator();
+            // Names that start with what was typed come before those that only contain it.
+            let (starts, rest): (Vec<FontFamily>, Vec<FontFamily>) =
+                FontFamily::installed().into_iter().partition(|f| want.is_empty() || f.label().to_lowercase().starts_with(&want));
+            for f in starts.into_iter().chain(rest) {
+                offer(ui, f);
+            }
+            if entered && let Some(f) = first.filter(|_| !want.is_empty()) {
+                *family = f;
+                ui.close();
+            }
+            note_hover(ui.ctx(), hovered);
+        });
+}
+
+/// The text size: a box to type any size from 1 to 500 points into (Enter, or a click away,
+/// applies it), with the usual sizes in a list beside it. Each applied size is one undo step.
+fn size_control(ui: &mut egui::Ui, size: &mut f64) {
+    let shown = |v: f64| if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v}") };
+    let id = ui.make_persistent_id("font-size-typed");
+    // What is in the box, and the size it was typed over. The text is kept while the box has the
+    // caret (also across the window losing focus) and follows the size when that changes
+    // elsewhere: a preset, or another item selected.
+    let kept: Option<(String, f64)> = ui.data(|d| d.get_temp(id));
+    let mut typed = kept.filter(|(_, over)| *over == *size).map_or_else(|| shown(*size), |(text, _)| text);
+    let resp = ui.add(egui::TextEdit::singleline(&mut typed).desired_width(34.0).horizontal_align(egui::Align::RIGHT));
+    // Clicking into the box selects the size, so typing replaces it.
+    if resp.gained_focus()
+        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id)
+    {
+        let end = egui::text::CCursor::new(typed.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), end)));
+        state.store(ui.ctx(), resp.id);
+    }
+    if resp.lost_focus() {
+        if let Ok(v) = typed.trim().replace(',', ".").parse::<f64>()
+            && v.is_finite()
+        {
+            *size = (v.clamp(1.0, 500.0) * 10.0).round() / 10.0;
+        }
+        ui.data_mut(|d| d.remove::<(String, f64)>(id));
+    } else {
+        ui.data_mut(|d| d.insert_temp(id, (typed, *size)));
+    }
+    ui.label("pt");
+    egui::ComboBox::from_id_salt("font-size").selected_text("").width(16.0).show_ui(ui, |ui| {
+        for preset in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0] {
+            ui.selectable_value(size, preset, format!("{preset} pt"));
+        }
+    });
+}
+
+/// The font menu entry under the pointer: (family, when the pointer reached it, when it was last
+/// seen there).
+type FamilyHover = (FontFamily, f64, f64);
+
+fn hover_id() -> egui::Id {
+    egui::Id::new("added-text-font-hover")
+}
+
+/// How long the pointer rests on a font before the selected text previews it (a sweep down the
+/// list loads nothing), and how long a preview outlives the last frame that saw the pointer there.
+const HOVER_DWELL: f64 = 0.2;
+const HOVER_FRESH: f64 = 0.25;
+
+fn note_hover(ctx: &egui::Context, hovered: Option<FontFamily>) {
+    let now = ctx.input(|i| i.time);
+    let before: Option<FamilyHover> = ctx.data(|d| d.get_temp(hover_id()));
+    match hovered {
+        Some(f) => {
+            let since = before.filter(|(family, ..)| *family == f).map_or(now, |(_, since, _)| since);
+            ctx.data_mut(|d| d.insert_temp::<FamilyHover>(hover_id(), (f, since, now)));
+            // Wake up for the preview to start, and afterwards to notice the pointer leaving.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        None if before.is_some() => ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id())),
+        None => {}
+    }
+}
+
+/// The font the pointer rests on in the font menu, to preview on the selected text (Add text)
+/// or in the open editor (Edit text).
+pub(crate) fn previewed_family(ctx: &egui::Context) -> Option<FontFamily> {
+    let now = ctx.input(|i| i.time);
+    let (family, since, seen): FamilyHover = ctx.data(|d| d.get_temp(hover_id()))?;
+    if now - seen > HOVER_FRESH {
+        // The menu closed with the pointer on an entry.
+        ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id()));
+        ctx.request_repaint();
+        return None;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    (now - since >= HOVER_DWELL).then_some(family)
+}
+
+/// The selected text as it would look in the font the pointer rests on in the font menu, drawn
+/// over the page until the pointer moves on. Nothing is changed in the document.
+/// Returns the box the previewed text takes, for the selection frame to follow.
+fn paint_family_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, t: &AddedText) -> Option<Rect> {
+    let family = previewed_family(ui.ctx()).filter(|f| *f != t.family)?;
+    let page_width = info.pages.get(page).map(|p| p.width as f64);
+    let shown = restyled(t, AddedText { family, ..t.clone() }, page_width);
+    let (old, new) = (screen_rect(xf, info, page, t.rect), screen_rect(xf, info, page, shown.rect));
+    let zoom = xf.rect.width() / xf.pw.max(1.0);
+    let font = crate::theme::document_font(ui.ctx(), family, t.bold, t.italic, (t.size as f32 * zoom).max(4.0));
+    let [cr, cg, cb] = t.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+    let galley = painter.layout(t.text.clone(), font, Color32::from_rgb(cr, cg, cb), new.width().max(8.0));
+    let x = match t.align {
+        TextAlign::Left | TextAlign::Justify => new.left(),
+        TextAlign::Center => new.center().x - galley.size().x / 2.0,
+        TextAlign::Right => new.right() - galley.size().x,
+    };
+    let text = Rect::from_min_size(Pos2::new(x, new.top()), galley.size());
+    painter.rect_filled(old.union(new).union(text).expand(2.0), CornerRadius::ZERO, Color32::WHITE);
+    painter.galley(text.min, galley, Color32::BLACK);
+    Some(new.union(text))
 }
 
 /// Format text (shown in the Edit panel while a text item is selected, or for new text).
 /// Returns the changed style; for a selected item the caller turns it into an update.
 pub(crate) fn format_panel(ui: &mut egui::Ui, t: &Tokens, style: &AddedText) -> Option<AddedText> {
+    format_panel_with(ui, t, style, true)
+}
+
+/// [`format_panel`]; `document_families` offers the craft-fonts and installed families too
+/// (Add text draws them; Edit text has only the standard ones).
+pub(crate) fn format_panel_with(ui: &mut egui::Ui, t: &Tokens, style: &AddedText, document_families: bool) -> Option<AddedText> {
     let mut s = style.clone();
     widgets::section_title(ui, tl!("Format text"));
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("font-family").selected_text(s.family.label()).width(110.0).show_ui(ui, |ui| {
-            for f in [FontFamily::Helvetica, FontFamily::Times, FontFamily::Courier] {
-                ui.selectable_value(&mut s.family, f, f.label());
-            }
-        });
-        // A list rather than a drag value: every change is an undo step.
-        egui::ComboBox::from_id_salt("font-size").selected_text(format!("{} pt", s.size)).width(70.0).show_ui(ui, |ui| {
-            for size in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0] {
-                ui.selectable_value(&mut s.size, size, format!("{size} pt"));
-            }
-        });
+        if document_families {
+            family_menu(ui, &mut s.family);
+        } else {
+            egui::ComboBox::from_id_salt("font-family").selected_text(s.family.label()).width(130.0).show_ui(ui, |ui| {
+                for f in [FontFamily::Helvetica, FontFamily::Times, FontFamily::Courier] {
+                    ui.selectable_value(&mut s.family, f, f.label());
+                }
+            });
+        }
+        size_control(ui, &mut s.size);
     });
     ui.horizontal(|ui| {
         if ui.selectable_label(s.bold, egui::RichText::new("B").strong()).on_hover_text(tl!("Bold")).clicked() {

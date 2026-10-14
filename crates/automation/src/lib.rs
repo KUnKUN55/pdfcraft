@@ -603,7 +603,11 @@ impl Automation {
                         "helvetica" => pdfcraft_engine::FontFamily::Helvetica,
                         "times" => pdfcraft_engine::FontFamily::Times,
                         "courier" => pdfcraft_engine::FontFamily::Courier,
-                        other => return Err(ToolError::InvalidArgs(format!("unknown font {other:?} (helvetica, times, courier)"))),
+                        "sarabun" => pdfcraft_engine::FontFamily::Sarabun,
+                        // A bundled family's full name, or a font installed on this machine.
+                        other => pdfcraft_engine::FontFamily::from_name(other).ok_or_else(|| {
+                            ToolError::InvalidArgs(format!("unknown font {other:?} (helvetica, times, courier, sarabun, or an installed font's family name)"))
+                        })?,
                     };
                     style.family = Some((family, a.opt_bool("bold")?.unwrap_or(false), a.opt_bool("italic")?.unwrap_or(false)));
                 }
@@ -1933,7 +1937,9 @@ fn parse_style_ranges(value: Option<&Value>) -> Result<Vec<pdfcraft_engine::Rang
                     "helvetica" => Ok(pdfcraft_engine::FontFamily::Helvetica),
                     "times" => Ok(pdfcraft_engine::FontFamily::Times),
                     "courier" => Ok(pdfcraft_engine::FontFamily::Courier),
-                    _ => Err(Args::wrong("font", "helvetica, times or courier")),
+                    "sarabun" => Ok(pdfcraft_engine::FontFamily::Sarabun),
+                    other => pdfcraft_engine::FontFamily::from_name(other)
+                        .ok_or_else(|| Args::wrong("font", "helvetica, times, courier, sarabun or an installed font's family name")),
                 })
                 .transpose()?
                 .map(|f| -> Result<_> { Ok((f, a.opt_bool("bold")?.unwrap_or(false), a.opt_bool("italic")?.unwrap_or(false))) })

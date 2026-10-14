@@ -381,7 +381,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
                 ui.label(tl!("Finding document fonts…"));
             }
         });
-        if let Some(look) = crate::content_ui::format_panel(ui, t, &ed.look) {
+        if let Some(look) = crate::content_ui::format_panel_with(ui, t, &ed.look, true) {
             ed.look = look;
             changed = true;
         }
@@ -428,14 +428,15 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         let doc = app.session.get(id)?;
         let a = doc.added.iter().filter(|a| a.page == page).nth(index)?;
         match &a.content {
-            pdfcraft_engine::AddedContent::Text(text) => Some((page, index, text.clone())),
+            pdfcraft_engine::AddedContent::Text(text) => Some((page, index, text.clone(), doc.info.pages.get(page).map(|p| p.width as f64))),
             _ => None,
         }
     });
     match selected {
-        Some((page, index, text)) => {
+        Some((page, index, text, page_width)) => {
             if let Some(style) = crate::content_ui::format_panel(ui, t, &text) {
                 app.text_style = pdfcraft_engine::AddedText { text: String::new(), rect: [0.0; 4], ..style.clone() };
+                let style = crate::content_ui::restyled(&text, style, page_width);
                 app.apply_edit(pdfcraft_engine::Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(style) });
             }
         }

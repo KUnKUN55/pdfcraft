@@ -26,20 +26,106 @@ pub enum Family {
     Helvetica,
     Times,
     Courier,
+    /// TH Sarabun PSK from the craft-fonts build input: drawn from its own outlines (Thai and
+    /// Latin alike), in its real bold and italic faces.
+    Sarabun,
+    /// A font installed on this machine (an index into `pdfcraft_fonts::installed_families`),
+    /// drawn from its own outlines like [`Family::Sarabun`].
+    Installed(u16),
 }
 
 impl Family {
+    /// The standard families, then the craft-fonts document families this build includes.
+    pub fn bundled() -> Vec<Family> {
+        let mut all = vec![Family::Helvetica, Family::Times, Family::Courier];
+        if Family::Sarabun.craft(false, false).is_some() {
+            all.push(Family::Sarabun);
+        }
+        all
+    }
+
+    /// The families of the fonts installed on this machine, by name.
+    pub fn installed() -> Vec<Family> {
+        (0..pdfcraft_fonts::installed_families().len()).filter_map(|i| u16::try_from(i).ok()).map(Family::Installed).collect()
+    }
+
+    /// The bundled or installed family called `name` (any case).
+    pub fn from_name(name: &str) -> Option<Family> {
+        let want = name.trim();
+        Family::bundled()
+            .into_iter()
+            .find(|f| f.label().eq_ignore_ascii_case(want))
+            .or_else(|| pdfcraft_fonts::installed_family(want).map(Family::Installed))
+    }
+
+    /// Whether the family's own face has Thai letters. The standard families don't: their Thai
+    /// is drawn in the document Thai face.
+    pub fn has_thai(self) -> bool {
+        match self {
+            Family::Helvetica | Family::Times | Family::Courier => false,
+            Family::Sarabun => true,
+            Family::Installed(_) => self.installed_family().is_some_and(|f| f.thai),
+        }
+    }
+
+    /// The document family a PDF font name (`ABCDEF+AngsanaNew-Bold`) names, when this build or
+    /// this machine has it: text edited in that font can then keep its look.
+    pub fn like_font(base_font: &str) -> Option<Family> {
+        let plain = pdfcraft_fonts::plain_family(base_font);
+        if matches!(plain.as_str(), "thsarabunpsk" | "thsarabunnew" | "thsarabun" | "sarabun") && Family::Sarabun.craft(false, false).is_some() {
+            return Some(Family::Sarabun);
+        }
+        pdfcraft_fonts::installed_family_like(base_font).map(Family::Installed)
+    }
+
+    fn installed_family(self) -> Option<&'static pdfcraft_fonts::InstalledFamily> {
+        match self {
+            Family::Installed(index) => pdfcraft_fonts::installed_families().get(usize::from(index)),
+            _ => None,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Family::Helvetica => "Helvetica",
             Family::Times => "Times",
             Family::Courier => "Courier",
+            Family::Sarabun => "TH Sarabun PSK",
+            Family::Installed(_) => self.installed_family().map_or("Helvetica", |f| f.name),
         }
     }
 
-    /// The standard-14 font name for this family and style.
+    /// The craft-fonts face that draws this family in a style; `None` for the standard families
+    /// and in a build without the face.
+    pub fn craft(self, bold: bool, italic: bool) -> Option<ShapedScript> {
+        match self {
+            Family::Sarabun => pdfcraft_fonts::document_family_font("TH Sarabun PSK", bold, italic),
+            Family::Installed(index) => pdfcraft_fonts::installed_face(index, bold, italic),
+            Family::Helvetica | Family::Times | Family::Courier => None,
+        }
+    }
+
+    /// The standard family that draws what this family's own face can't (itself for a standard
+    /// family).
+    fn standard(self) -> Family {
+        match self {
+            Family::Sarabun | Family::Installed(_) => Family::Helvetica,
+            other => other,
+        }
+    }
+
+    /// The font name recorded for this family and style (a standard-14 name for the standard
+    /// families).
     pub fn base_font(self, bold: bool, italic: bool) -> &'static str {
+        if let Some(family) = self.installed_family() {
+            return family.base.get(usize::from(bold) | usize::from(italic) << 1).copied().unwrap_or("Helvetica");
+        }
         match (self, bold, italic) {
+            (Family::Installed(_), ..) => "Helvetica",
+            (Family::Sarabun, false, false) => "THSarabunPSK",
+            (Family::Sarabun, true, false) => "THSarabunPSK-Bold",
+            (Family::Sarabun, false, true) => "THSarabunPSK-Italic",
+            (Family::Sarabun, true, true) => "THSarabunPSK-BoldItalic",
             (Family::Helvetica, false, false) => "Helvetica",
             (Family::Helvetica, true, false) => "Helvetica-Bold",
             (Family::Helvetica, false, true) => "Helvetica-Oblique",
@@ -57,7 +143,9 @@ impl Family {
 
     fn from_base(base: &[u8]) -> (Family, bool, bool) {
         let s = String::from_utf8_lossy(base);
-        let family = if s.starts_with("Times") {
+        let family = if s.starts_with("THSarabunPSK") {
+            Family::Sarabun
+        } else if s.starts_with("Times") {
             Family::Times
         } else if s.starts_with("Courier") {
             Family::Courier
@@ -74,9 +162,26 @@ impl Family {
             Family::Courier => s.chars().count() as f64 * 0.6 * size,
             Family::Times => helvetica_width(s, size) * 0.9,
             Family::Helvetica => helvetica_width(s, size),
+            // The face's own advances; Helvetica's estimate for what it can't shape.
+            Family::Sarabun | Family::Installed(_) => {
+                return self
+                    .craft(bold, false)
+                    .and_then(|face| pdfcraft_fonts::shape_face(s, face, s.chars().any(is_thai)).ok())
+                    .map_or_else(|| helvetica_width(s, size), |clusters| clusters.iter().map(|c| c.advance).sum::<f64>() * size);
+            }
         };
         if bold { w * 1.05 } else { w }
     }
+}
+
+/// The craft-fonts face an item's family draws with, in the item's style.
+fn craft_face(t: &AddedText) -> Option<ShapedScript> {
+    t.family.craft(t.bold, t.italic)
+}
+
+/// The width of `s` in the standard font that draws an item's unshaped text.
+fn latin_width(t: &AddedText, s: &str) -> f64 {
+    t.family.standard().width(s, t.size, t.bold)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -240,13 +345,14 @@ fn wrapped(t: &AddedText) -> Vec<(String, bool)> {
         // sum of its words' and shaping stays linear in the paragraph's length. The space is the
         // paragraph's; a space between Latin words is drawn in the item's font, a few hundredths
         // of an em apart.
-        let measure = |s: &str| if arabic || thai { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold) };
+        // A craft-fonts family is shaped too: its widths are its face's.
+        let shaped = arabic || thai || craft_face(t).is_some();
+        let measure = |s: &str| if shaped { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold) };
         let space = measure(" ");
         let (mut line, mut line_w) = (String::new(), 0.0);
         for word in para.split(' ') {
             let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            let candidate_w =
-                if arabic || thai { if line.is_empty() { measure(word) } else { line_w + space + measure(word) } } else { measure(&candidate) };
+            let candidate_w = if shaped { if line.is_empty() { measure(word) } else { line_w + space + measure(word) } } else { measure(&candidate) };
             if !line.is_empty() && candidate_w > width {
                 out.push((std::mem::take(&mut line), rtl));
                 line = word.to_string();
@@ -271,22 +377,29 @@ fn thai_lines(t: &AddedText, para: &str, width: f64) -> Result<Vec<String>, Edit
             Piece::Shaped(clusters) => atoms.extend(clusters.into_iter().map(|c| (c.text, c.advance * t.size))),
             Piece::Latin(s) => atoms.extend(s.chars().map(|c| {
                 let text = c.to_string();
-                let w = t.family.width(&text, t.size, t.bold);
+                let w = latin_width(t, &text);
                 (text, w)
             })),
         }
     }
     let mut lines = Vec::new();
-    let (mut line, mut used) = (String::new(), 0.0);
+    let mut line: Vec<(String, f64)> = Vec::new();
+    let mut used = 0.0;
     for (text, advance) in atoms {
-        if !line.is_empty() && used + advance > width {
-            lines.push(std::mem::take(&mut line));
-            used = 0.0;
+        if !line.is_empty() && used + advance > width && text != " " {
+            // Break after the line's last space when it has one, so a phrase stays whole; else at
+            // this cluster.
+            let cut = line.iter().rposition(|(s, _)| s == " ").map_or(line.len(), |i| i.saturating_add(1));
+            let rest = line.split_off(cut);
+            let head: String = line.iter().map(|(s, _)| s.as_str()).collect();
+            lines.push(head.trim_end_matches(' ').to_string());
+            used = rest.iter().map(|(_, w)| *w).sum();
+            line = rest;
         }
-        line.push_str(&text);
         used += advance;
+        line.push((text, advance));
     }
-    lines.push(line);
+    lines.push(line.iter().map(|(s, _)| s.as_str()).collect());
     Ok(lines)
 }
 
@@ -304,6 +417,11 @@ fn is_arabic(c: char) -> bool {
 /// with the craft-fonts Arabic face (#125), or Arabic that the face can't draw (or that has no
 /// face to draw it). Page-content tools refuse such text; the Add-text editor keeps it open.
 pub fn first_undrawable(t: &AddedText) -> Option<char> {
+    // A craft-fonts family draws what its face has; the rest is checked as the standard font's.
+    if let Some(face) = craft_face(t) {
+        let rest: String = t.text.chars().filter(|c| *c == '\n' || !pdfcraft_fonts::face_has(face, *c)).collect();
+        return first_undrawable(&AddedText { text: rest, family: t.family.standard(), ..t.clone() });
+    }
     if t.text.chars().any(is_thai) {
         if let Some(c) = t.text.chars().find(|c| is_thai(*c) && !pdfcraft_fonts::thai_has(*c)) {
             return Some(c);
@@ -380,14 +498,18 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
         let Some(text) = line.get(run) else { continue };
         // Arabic letters take the Arabic face; so do spaces and punctuation between them, which the
         // shaper then mirrors. Latin text (and what the face lacks) keeps the item's font.
-        let mut segments: Vec<(Option<ShapedScript>, String)> = Vec::new();
+        // A craft-fonts family's face takes every character it has, Thai and Latin in runs of
+        // their own so each is shaped as its script.
+        let craft = craft_face(t);
+        let mut segments: Vec<((Option<ShapedScript>, bool), String)> = Vec::new();
         for c in text.chars().filter(|c| !is_bidi_control(*c)) {
+            let own = craft.filter(|face| pdfcraft_fonts::face_has(*face, c));
             let script = if is_thai(c) {
-                Some(ShapedScript::Thai)
+                (Some(own.unwrap_or(ShapedScript::Thai)), true)
             } else if is_arabic(c) || (run_rtl && !c.is_alphanumeric() && pdfcraft_fonts::arabic_has(c)) {
-                Some(ShapedScript::Arabic)
+                (Some(ShapedScript::Arabic), false)
             } else {
-                None
+                (own, false)
             };
             match segments.last_mut() {
                 Some((kind, s)) if *kind == script => s.push(c),
@@ -397,11 +519,12 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
         if run_rtl {
             segments.reverse();
         }
-        for (script, s) in segments {
+        for ((script, thai), s) in segments {
             pieces.push(if let Some(script) = script {
                 let shaped = match script {
                     ShapedScript::Arabic => shape_arabic(&s, run_rtl).map_err(|e| arabic_error(e, &s))?,
                     ShapedScript::Thai => shape_thai(&s).map_err(|e| thai_error(e, &s))?,
+                    ShapedScript::Craft(_) => pdfcraft_fonts::shape_face(&s, script, thai).map_err(|e| craft_error(t.family, e, &s))?,
                 };
                 Piece::Shaped(shaped)
             } else if run_rtl {
@@ -414,7 +537,7 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
     let width = pieces
         .iter()
         .map(|p| match p {
-            Piece::Latin(s) => t.family.width(s, t.size, t.bold),
+            Piece::Latin(s) => latin_width(t, s),
             Piece::Shaped(clusters) => clusters.iter().map(|c| c.advance).sum::<f64>() * t.size,
         })
         .sum();
@@ -424,7 +547,16 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
 /// The width of `s` in a shaped-text item; the item's font's estimate if it can't be shaped (drawing
 /// then reports why).
 fn shaped_width(t: &AddedText, s: &str, rtl: bool) -> f64 {
-    shaped_layout(t, s, rtl).map(|(_, w)| w).unwrap_or_else(|_| t.family.width(s, t.size, t.bold))
+    shaped_layout(t, s, rtl).map(|(_, w)| w).unwrap_or_else(|_| latin_width(t, s))
+}
+
+fn craft_error(family: Family, e: GlyphError, text: &str) -> EditError {
+    let name = family.label();
+    EditError::Invalid(match e {
+        GlyphError::NoFont => format!("this build doesn't include the {name} font"),
+        GlyphError::Missing => format!("the {name} font can't show \"{text}\""),
+        GlyphError::TooComplex => format!("the {name} glyphs for \"{text}\" are too complex"),
+    })
 }
 
 fn arabic_error(e: GlyphError, text: &str) -> EditError {
@@ -445,6 +577,52 @@ fn thai_error(e: GlyphError, text: &str) -> EditError {
         GlyphError::Missing => format!("the Thai font can't show \"{text}\""),
         GlyphError::TooComplex => "the Thai glyphs are too complex; use a shorter text box".into(),
     })
+}
+
+/// Whether `t`'s box is narrow enough to wrap one of its paragraphs.
+pub fn text_is_wrapped(t: &AddedText) -> bool {
+    lines(t).len() > t.text.split('\n').count()
+}
+
+/// The width of `t`'s widest paragraph when nothing wraps, at its size.
+fn natural_width(t: &AddedText) -> f64 {
+    let shaped = craft_face(t).is_some() || t.text.chars().any(|c| is_thai(c) || is_arabic(c));
+    t.text
+        .split('\n')
+        .map(|para| {
+            let rtl = para.chars().any(is_arabic) && unicode_bidi::get_base_direction(para) == unicode_bidi::Direction::Rtl;
+            if shaped { shaped_width(t, para, rtl) } else { t.family.width(para, t.size, t.bold) }
+        })
+        .fold(0.0, f64::max)
+}
+
+/// `t` in a box that hugs its text: as wide as its widest paragraph, or as far as the page's
+/// edge (`page_width`, display points), where it wraps. The box keeps the edge its alignment
+/// anchors: the left one, the right one for right-aligned text, the middle for centred text.
+pub fn fitted_text(t: &AddedText, page_width: f64) -> AddedText {
+    // Room so rounding never wraps the last word.
+    let natural = natural_width(t) + 2.0;
+    let r = norm(t.rect);
+    let least = t.size.max(4.0);
+    let (x0, x1) = match t.align {
+        Align::Right => {
+            let w = natural.min(r[2].max(least)).max(least);
+            (r[2] - w, r[2])
+        }
+        Align::Center => {
+            let c = (r[0] + r[2]) / 2.0;
+            let half = (natural / 2.0).min(c.min(page_width - c).max(least / 2.0)).max(least / 2.0);
+            (c - half, c + half)
+        }
+        Align::Left | Align::Justify => {
+            let w = natural.min((page_width - r[0]).max(least)).max(least);
+            (r[0], r[0] + w)
+        }
+    };
+    if !(x0.is_finite() && x1.is_finite()) {
+        return t.clone();
+    }
+    AddedText { rect: [x0, r[1], x1, r[3]], ..t.clone() }
 }
 
 /// The box a text item occupies (height from its lines).
@@ -489,7 +667,7 @@ fn draw_laid_shaped(
     outline: impl Fn(ShapedScript, u32) -> Result<GlyphOutline, GlyphError>,
 ) -> Result<(), EditError> {
     let r = text_rect(t);
-    let latin = font_name(t.family.base_font(t.bold, t.italic));
+    let latin = font_name(t.family.standard().base_font(t.bold, t.italic));
     // Every distinct cluster (a letter with its dots and the text it stands for) is one glyph of
     // one of the fonts, so copy and search get each character exactly once.
     let mut keys: Vec<&ShapedCluster> = Vec::new();
@@ -512,6 +690,7 @@ fn draw_laid_shaped(
                 entry.insert(outline(c.script, *id).map_err(|e| match c.script {
                     ShapedScript::Arabic => arabic_error(e, &c.text),
                     ShapedScript::Thai => thai_error(e, &c.text),
+                    ShapedScript::Craft(_) => craft_error(t.family, e, &c.text),
                 })?);
             }
         }
@@ -560,7 +739,7 @@ fn draw_laid_shaped(
                     out.extend(literal(&win_ansi(s)));
                     out.extend_from_slice(b" Tj\n");
                     current = Some(latin.as_str());
-                    pen += t.family.width(s, t.size, t.bold) + tw * s.matches(' ').count() as f64;
+                    pen += latin_width(t, s) + tw * s.matches(' ').count() as f64;
                 }
                 Piece::Shaped(clusters) => {
                     for c in clusters {
@@ -651,6 +830,7 @@ fn type3_shaped(doc: &mut Document, clusters: &[&ShapedCluster], outlines: &Hash
             match script {
                 ShapedScript::Arabic => "Arabic",
                 ShapedScript::Thai => "Thai",
+                ShapedScript::Craft(_) => "PdfCraft Text",
             },
             |f| f.family,
         ),
@@ -691,18 +871,24 @@ fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing:
     let mut out = format!("q {} {} {} {} {} {} cm\n", n(view[0]), n(view[1]), n(view[2]), n(view[3]), n(view[4]), n(view[5])).into_bytes();
     match c {
         Content::Text(t) => {
-            let base = t.family.base_font(t.bold, t.italic);
+            // The standard font: the item's own, or the one that draws what a craft-fonts family's
+            // face lacks.
+            let standard = t.family.standard();
+            let base = standard.base_font(t.bold, t.italic);
             let name = font_name(base);
             let mut font = Dict::new();
             font.set(b"Type".to_vec(), Object::name("Font"));
             font.set(b"Subtype".to_vec(), Object::name("Type1"));
             font.set(b"BaseFont".to_vec(), Object::name(base));
-            if t.family != Family::Courier || !t.text.is_ascii() {
+            if standard != Family::Courier || !t.text.is_ascii() {
                 font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
             }
             let mut fonts = Dict::new();
             fonts.set(name.clone().into_bytes(), Object::Dict(font));
-            if t.text.chars().any(is_thai) || (t.text.chars().any(is_arabic) && (pdfcraft_fonts::document_arabic_font().is_some() || !existing)) {
+            if craft_face(t).is_some()
+                || t.text.chars().any(is_thai)
+                || (t.text.chars().any(is_arabic) && (pdfcraft_fonts::document_arabic_font().is_some() || !existing))
+            {
                 draw_shaped(doc, t, taken, &mut fonts, &mut out)?;
                 res.set(b"Font".to_vec(), Object::Dict(fonts));
                 out.extend_from_slice(b"Q\n");
@@ -773,6 +959,12 @@ fn params(c: &Content) -> Dict {
             d.set(b"Kind".to_vec(), Object::name("Text"));
             d.set(b"Text".to_vec(), PdfString::text(&t.text));
             d.set(b"Font".to_vec(), Object::name(t.family.base_font(t.bold, t.italic)));
+            // An installed font is found again by its family name; its style is recorded apart,
+            // since a family's name may itself say "Bold".
+            if let Family::Installed(_) = t.family {
+                d.set(b"FontFamily".to_vec(), PdfString::text(t.family.label()));
+                d.set(b"FontStyle".to_vec(), Object::Int(i64::from(t.bold) | i64::from(t.italic) << 1));
+            }
             d.set(b"Size".to_vec(), Object::Real(t.size));
             d.set(b"Color".to_vec(), arr(&t.color));
             d.set(
@@ -812,7 +1004,13 @@ fn parse(doc: &Document, d: &Dict) -> Option<Content> {
     let rect: [f64; 4] = r.try_into().ok()?;
     match d.name(b"Kind")? {
         b"Text" => {
-            let (family, bold, italic) = Family::from_base(d.name(b"Font").unwrap_or(b"Helvetica"));
+            let (mut family, mut bold, mut italic) = Family::from_base(d.name(b"Font").unwrap_or(b"Helvetica"));
+            // An installed font's family; Helvetica on a machine that doesn't have it.
+            if let Some(name) = d.get(b"FontFamily").and_then(|f| doc.resolve(f).as_string().map(|s| s.to_text())) {
+                let style = d.int(b"FontStyle").unwrap_or(0);
+                (bold, italic) = (style & 1 != 0, style & 2 != 0);
+                family = pdfcraft_fonts::installed_family(&name).map_or(Family::Helvetica, Family::Installed);
+            }
             let c = nums(doc, d.get(b"Color"));
             Some(Content::Text(AddedText {
                 rect,

@@ -212,6 +212,17 @@ impl CjkPreference {
 /// faces take effect next frame.
 pub fn install_fonts_for(ctx: &egui::Context, cjk: CjkPreference) {
     ctx.set_fonts(installed_font_definitions(cjk));
+    // List the installed document fonts off the GUI thread, so the Add text font menu and
+    // documents that use them don't wait for the scan.
+    #[cfg(not(target_arch = "wasm32"))]
+    if !cfg!(test) {
+        static SCAN: std::sync::Once = std::sync::Once::new();
+        SCAN.call_once(|| {
+            let _ = std::thread::Builder::new().name("installed-fonts".into()).spawn(|| {
+                let _ = pdfcraft_fonts::installed_families();
+            });
+        });
+    }
 }
 
 /// The name of the installed face [`installed_font_definitions`] may add after the embedded ones.
@@ -357,7 +368,74 @@ fn font_definitions_for_platform(prefer_hans: bool, platform: FontPolicyPlatform
         stack.extend(fallback.iter().cloned());
         fonts.families.insert(FontFamily::Name(fam.into()), stack);
     }
+    // The craft-fonts document families of Add text, one egui family per style, so the box being
+    // typed in shows the face the text is saved with. The interface faces follow as fallbacks.
+    for family in pdfcraft_engine::FontFamily::bundled() {
+        for (bold, italic) in [(false, false), (true, false), (false, true), (true, true)] {
+            let Some(face) = family.craft(bold, italic).and_then(pdfcraft_fonts::ShapedScript::font) else { continue };
+            let name = document_family_name(family, bold, italic);
+            if !fonts.font_data.contains_key(&name) {
+                add(&mut fonts, &name, face.bytes);
+            }
+            let mut stack = vec![name.clone()];
+            stack.extend(fallback.iter().cloned());
+            fonts.families.insert(FontFamily::Name(name.into()), stack);
+        }
+    }
+    // A standard family's Thai is saved in the document Thai face: show that face for it while
+    // typing too, ahead of the interface's Thai face.
+    if let Some(thai) = pdfcraft_fonts::document_thai_font() {
+        let name = format!("doc-thai-{}", thai.name());
+        if !fonts.font_data.contains_key(&name) {
+            add(&mut fonts, &name, thai.bytes);
+        }
+        let mut stack = fallback.clone();
+        stack.insert(1.min(stack.len()), name);
+        fonts.families.insert(FontFamily::Name(DOCUMENT_STANDARD.into()), stack);
+    }
     fonts
+}
+
+const DOCUMENT_STANDARD: &str = "doc-standard";
+
+fn document_family_name(family: pdfcraft_engine::FontFamily, bold: bool, italic: bool) -> String {
+    format!("doc-{}", family.base_font(bold, italic))
+}
+
+/// The egui font that shows an Add text item's family while it is typed: the craft-fonts face
+/// for a document family this build has, else the interface font.
+pub fn document_font(ctx: &egui::Context, family: pdfcraft_engine::FontFamily, bold: bool, italic: bool, size: f32) -> FontId {
+    if let Some(face) = family.craft(bold, italic) {
+        let name = document_family_name(family, bold, italic);
+        let key = FontFamily::Name(name.clone().into());
+        if ctx.fonts(|f| f.definitions().families.contains_key(&key)) {
+            return FontId::new(size, key);
+        }
+        // An installed font joins the atlas the first time it is typed with, and shows from the
+        // next frame; until then the interface font stands in.
+        if let Some((bytes, index)) = pdfcraft_fonts::face_data(face) {
+            let mut definitions = ctx.fonts(|f| f.definitions().clone());
+            let mut data = FontData::from_static(bytes);
+            data.index = index;
+            definitions.font_data.insert(name.clone(), Arc::new(data));
+            let mut stack = vec![name];
+            // Thai the face lacks is saved in the document Thai face: show it in that one too.
+            if let Some(thai) = pdfcraft_fonts::document_thai_font().map(|f| format!("doc-thai-{}", f.name()))
+                && definitions.font_data.contains_key(&thai)
+            {
+                stack.push(thai);
+            }
+            stack.extend(definitions.families.get(&FontFamily::Proportional).into_iter().flatten().cloned());
+            definitions.families.insert(key, stack);
+            ctx.set_fonts(definitions);
+            ctx.request_repaint();
+        }
+        regular(size)
+    } else if pdfcraft_fonts::document_thai_font().is_some() {
+        FontId::new(size, FontFamily::Name(DOCUMENT_STANDARD.into()))
+    } else {
+        regular(size)
+    }
 }
 
 pub fn regular(size: f32) -> FontId {

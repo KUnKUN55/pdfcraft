@@ -1967,7 +1967,9 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if pressed(cmd(Key::CloseBracket)) {
         view.view_history(true);
     }
-    let key = |k| ctx.input(|i| i.key_pressed(k));
+    // With an added item selected the arrow keys move it, not the page.
+    let nudging = crate::content_ui::arrows_nudge(view);
+    let key = |k| !(nudging && matches!(k, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)) && ctx.input(|i| i.key_pressed(k));
     if key(Key::Escape) {
         if view.camera.is_some() || view.camera_done.is_some() {
             view.pending_action = Some(ViewAction::CancelCamera);
@@ -3241,7 +3243,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         crate::prepare::keys(ui.ctx(), view);
     }
     if editing_content {
-        crate::content_ui::keys(ui.ctx(), view);
+        crate::content_ui::keys(ui.ctx(), view, &added);
+    } else {
+        // Outside Add content nothing shows the selection, so the arrow keys are the page's again.
+        view.content.selected = None;
     }
     if tool == QuickTool::Link {
         crate::link_ui::keys(ui.ctx(), view);

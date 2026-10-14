@@ -27,6 +27,10 @@ pub struct ShapedCluster {
 pub enum ShapedScript {
     Arabic,
     Thai,
+    /// A face chosen as the item's document family; it draws every character it has, Latin
+    /// included. An index into `CRAFT_FONTS`, or past its end, into the installed faces loaded
+    /// so far (`crate::installed`).
+    Craft(u16),
 }
 
 impl ShapedScript {
@@ -34,16 +38,31 @@ impl ShapedScript {
         match self {
             Self::Arabic => crate::document_arabic_font(),
             Self::Thai => crate::document_thai_font(),
+            Self::Craft(index) => {
+                let index = usize::from(index);
+                crate::CRAFT_FONTS.get(index).or_else(|| crate::installed::loaded(index.checked_sub(crate::CRAFT_FONTS.len())?).map(|l| &l.info))
+            }
         }
     }
 }
 
+type Face = Option<(FontRef<'static>, ShaperData)>;
+
 fn face(script: ShapedScript) -> Option<&'static (FontRef<'static>, ShaperData)> {
-    static FACE: OnceLock<Option<(FontRef<'static>, ShaperData)>> = OnceLock::new();
-    static THAI: OnceLock<Option<(FontRef<'static>, ShaperData)>> = OnceLock::new();
+    static FACE: OnceLock<Face> = OnceLock::new();
+    static THAI: OnceLock<Face> = OnceLock::new();
+    static CRAFT: OnceLock<Vec<OnceLock<Face>>> = OnceLock::new();
     let cache = match script {
         ShapedScript::Arabic => &FACE,
         ShapedScript::Thai => &THAI,
+        ShapedScript::Craft(index) => {
+            let index = usize::from(index);
+            // An installed face was parsed when it was loaded.
+            if let Some(slot) = index.checked_sub(crate::CRAFT_FONTS.len()) {
+                return crate::installed::loaded(slot).map(|l| &l.face);
+            }
+            CRAFT.get_or_init(|| crate::CRAFT_FONTS.iter().map(|_| OnceLock::new()).collect()).get(index)?
+        }
     };
     cache
         .get_or_init(|| {
@@ -52,6 +71,33 @@ fn face(script: ShapedScript) -> Option<&'static (FontRef<'static>, ShaperData)>
             Some((font, data))
         })
         .as_ref()
+}
+
+/// The craft-fonts face of a document family in a style, e.g. `("TH Sarabun PSK", true, false)`
+/// for its Bold. A missing style falls back to the family's Regular; `None` when the build has no
+/// face of that family.
+pub fn document_family_font(family: &str, bold: bool, italic: bool) -> Option<ShapedScript> {
+    let style = match (bold, italic) {
+        (false, false) => "Regular",
+        (true, false) => "Bold",
+        (false, true) => "Italic",
+        (true, true) => "Bold Italic",
+    };
+    let find = |style: &str| crate::CRAFT_FONTS.iter().position(|f| f.family == family && f.style == style);
+    let index = find(style).or_else(|| find("Regular"))?;
+    let script = ShapedScript::Craft(u16::try_from(index).ok()?);
+    face(script).map(|_| script)
+}
+
+/// Whether the face behind `script` has a glyph for `c` (false without the face).
+pub fn face_has(script: ShapedScript, c: char) -> bool {
+    face(script).is_some_and(|(font, _)| font.charmap().map(c).is_some())
+}
+
+/// Shape a left-to-right run of `text` with the face behind `script`. `thai` runs are shaped as
+/// Thai (marks stay with their base); others let the shaper guess the script from the text.
+pub fn shape_face(text: &str, script: ShapedScript, thai: bool) -> Result<Vec<ShapedCluster>, GlyphError> {
+    shape_run(text, false, script, if thai { Some(script::THAI) } else { None })
 }
 
 /// Whether the Arabic document face has a glyph for `c` (false without the face).
@@ -77,20 +123,29 @@ pub fn shape_thai(text: &str) -> Result<Vec<ShapedCluster>, GlyphError> {
 }
 
 fn shape_script(text: &str, rtl: bool, kind: ShapedScript) -> Result<Vec<ShapedCluster>, GlyphError> {
+    let script = match kind {
+        ShapedScript::Arabic => Some(script::ARABIC),
+        ShapedScript::Thai => Some(script::THAI),
+        ShapedScript::Craft(_) => None,
+    };
+    shape_run(text, rtl, kind, script)
+}
+
+fn shape_run(text: &str, rtl: bool, kind: ShapedScript, script: Option<harfrust::Script>) -> Result<Vec<ShapedCluster>, GlyphError> {
     let (font, data) = face(kind).ok_or(GlyphError::NoFont)?;
     let shaper = data.shaper(font).build();
     let scale = 1.0 / f64::from(shaper.units_per_em().max(1));
     let mut buffer = UnicodeBuffer::new();
     buffer.push_str(text);
     buffer.set_direction(if rtl { Direction::RightToLeft } else { Direction::LeftToRight });
-    buffer.set_script(match kind {
-        ShapedScript::Arabic => script::ARABIC,
-        ShapedScript::Thai => script::THAI,
-    });
+    match script {
+        Some(script) => buffer.set_script(script),
+        None => buffer.guess_segment_properties(),
+    }
     // Preserve the historical Arabic per-character mapping; Thai marks stay with their base.
     buffer.set_cluster_level(match kind {
         ShapedScript::Arabic => BufferClusterLevel::Characters,
-        ShapedScript::Thai => BufferClusterLevel::MonotoneGraphemes,
+        ShapedScript::Thai | ShapedScript::Craft(_) => BufferClusterLevel::MonotoneGraphemes,
     });
     let shaped = shaper.shape(buffer, ShapeOptions::new());
     // Clusters are byte offsets into `text`; a cluster shows the characters up to the next one.

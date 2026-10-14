@@ -1046,7 +1046,244 @@ const HEBREW_FONT_NAME: &str = "PCHebrew";
 /// one of them is split across several, which read back as one line (see [`same_font`]).
 fn is_type3_fallback(font: &Dict) -> bool {
     font.name(b"Subtype") == Some(b"Type3")
-        && font.name(b"Name").is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes())
+        && font
+            .name(b"Name")
+            .is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes() || n == SHAPED_FONT_NAME.as_bytes())
+}
+
+/// The `/Name` of the Type 3 fonts generated from a shaped face: Thai text, or a craft-fonts or
+/// installed family chosen for the paragraph. Each glyph is one cluster (a letter with its marks).
+const SHAPED_FONT_NAME: &str = "PCShaped";
+
+fn is_thai(c: char) -> bool {
+    matches!(u32::from(c), 0x0E00..=0x0E7F)
+}
+
+/// A character drawn on the one before it: Thai upper and lower vowels, tone marks and Sara Am,
+/// combining diacritics, joiners and variation selectors.
+fn joins_previous(c: char) -> bool {
+    matches!(u32::from(c), 0x0E31 | 0x0E33..=0x0E3A | 0x0E47..=0x0E4E | 0x0300..=0x036F | 0x200D | 0xFE00..=0xFE0F)
+}
+
+/// `text` as clusters: each character with the marks drawn on it. The same split wherever the
+/// text is cut between words, so a wrapped line finds the glyphs its paragraph was given.
+fn clusters(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (at, c) in text.char_indices() {
+        if at > start && !joins_previous(c) {
+            out.extend(text.get(start..at));
+            start = at;
+        }
+    }
+    if start < text.len() {
+        out.extend(text.get(start..));
+    }
+    out
+}
+
+/// The codes and advances of a shaped fallback's clusters.
+#[derive(Clone)]
+struct ShapedCodes {
+    /// Where each cluster is shown: the index of its font in `names`, and its code there.
+    codes: HashMap<String, (usize, u8)>,
+    /// Each cluster's advance (em).
+    widths: HashMap<String, f64>,
+}
+
+impl ShapedCodes {
+    /// The advance of `text` at `size`, with `char_spacing` after each cluster.
+    fn width(&self, text: &str, size: f64, char_spacing: f64) -> f64 {
+        clusters(text).iter().map(|c| self.widths.get(*c).copied().unwrap_or(0.0) * size + char_spacing).sum()
+    }
+}
+
+/// One glyph of a shaped fallback font: a cluster's outlines, already placed.
+struct ShapedGlyph {
+    code: u8,
+    text: String,
+    path: Vec<u8>,
+    width: f64,
+    /// Its ink box in glyph space (thousandths of an em).
+    bbox: [f64; 4],
+}
+
+/// The faces that draw `text` shaped, best first: the craft-fonts or installed family chosen for
+/// it, then the document Thai face for Thai. Empty when the older fallbacks apply.
+fn shaped_faces(text: &str, family: crate::added::Family, bold: bool, italic: bool, source: &str) -> Vec<pdfcraft_fonts::ShapedScript> {
+    let mut faces: Vec<pdfcraft_fonts::ShapedScript> = family.craft(bold, italic).into_iter().collect();
+    if text.chars().any(is_thai) {
+        // No family chosen: the text's own font, when this machine has it, so the edit keeps its look.
+        if faces.is_empty()
+            && let Some(own) = crate::added::Family::like_font(source).and_then(|f| f.craft(bold, italic))
+        {
+            faces.push(own);
+        }
+        let thai = crate::added::Family::Sarabun
+            .craft(bold, italic)
+            .or_else(|| pdfcraft_fonts::document_thai_font().map(|_| pdfcraft_fonts::ShapedScript::Thai));
+        if let Some(thai) = thai.filter(|t| !faces.contains(t)) {
+            faces.push(thai);
+        }
+    }
+    faces
+}
+
+/// The glyph procedure, advance and ink box of `cluster` shaped alone in `face` (so it looks the
+/// same wherever it stands).
+fn shaped_path(face: pdfcraft_fonts::ShapedScript, cluster: &str) -> Result<(Vec<u8>, f64, [f64; 4]), GlyphError> {
+    let scale = 1000.0;
+    let shaped = pdfcraft_fonts::shape_face(cluster, face, cluster.chars().any(is_thai))?;
+    let mut paths = Vec::new();
+    let mut ink: Option<[f64; 4]> = None;
+    let mut pen = 0.0;
+    for part in &shaped {
+        for (id, [dx, dy]) in &part.glyphs {
+            let glyph = pdfcraft_fonts::shaped_glyph(face, *id)?;
+            let (x, y) = (pen + dx, *dy);
+            for contour in &glyph.contours {
+                let Some(first) = contour.first() else { continue };
+                paths.extend_from_slice(format!("{} {} m\n", pdf_num((first[0] + x) * scale), pdf_num((first[1] + y) * scale)).as_bytes());
+                for p in contour.iter().skip(1) {
+                    paths.extend_from_slice(format!("{} {} l\n", pdf_num((p[0] + x) * scale), pdf_num((p[1] + y) * scale)).as_bytes());
+                }
+                paths.extend_from_slice(b"h\n");
+            }
+            if !glyph.contours.is_empty() {
+                let b = [glyph.bbox[0] + x, glyph.bbox[1] + y, glyph.bbox[2] + x, glyph.bbox[3] + y];
+                ink = Some(ink.map_or(b, |a| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]));
+            }
+        }
+        pen += part.advance;
+    }
+    // Rounded outwards so no ink is clipped.
+    let bbox = ink.map_or([0.0; 4], |b| [(b[0] * scale).floor(), (b[1] * scale).floor(), (b[2] * scale).ceil(), (b[3] * scale).ceil()]);
+    let mut out =
+        format!("{} 0 {} {} {} {} d1\n", pdf_num(pen * scale), pdf_num(bbox[0]), pdf_num(bbox[1]), pdf_num(bbox[2]), pdf_num(bbox[3])).into_bytes();
+    out.extend(paths);
+    out.extend_from_slice(b"f\n");
+    Ok((out, pen, bbox))
+}
+
+/// The fonts that show `text` shaped in `faces`: every cluster from the first face that has it.
+fn shaped_font(
+    doc: &mut Document,
+    fonts_res: &mut Dict,
+    text: &str,
+    faces: &[pdfcraft_fonts::ShapedScript],
+    max_glyphs: usize,
+) -> Result<Type3Fallback, EditError> {
+    let face = faces.first().copied().ok_or_else(no_japanese_font)?;
+    let info = face.font();
+    let family = info.map_or("Thai", |f| f.family);
+    let mut unique: Vec<&str> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for cluster in clusters(text) {
+        if seen.insert(cluster) {
+            unique.push(cluster);
+        }
+    }
+    if unique.is_empty() {
+        return Err(EditError::Invalid("replacement text is empty".into()));
+    }
+    // Every outline is read before the document is touched, so a character that fails leaves it
+    // as it was. Each font takes the next `per_font` clusters; codes restart at 1 in each.
+    let per_font = max_glyphs.clamp(1, MAX_TYPE3_GLYPHS);
+    let mut glyphs = Vec::with_capacity(unique.len());
+    for (i, cluster) in unique.into_iter().enumerate() {
+        let (path, width, bbox) = faces.iter().find_map(|f| shaped_path(*f, cluster).ok()).ok_or_else(|| {
+            let ch = cluster.chars().next().unwrap_or(' ');
+            EditError::Invalid(format!("the {family} font can't show \"{cluster}\" (U+{:04X})", ch as u32))
+        })?;
+        let code = u8::try_from((i % per_font).saturating_add(1))
+            .map_err(|_| EditError::Invalid("replacement text has too many unique characters".into()))?;
+        glyphs.push(ShapedGlyph { code, text: cluster.to_string(), path, width, bbox });
+    }
+    let mut shaped = ShapedCodes { codes: HashMap::with_capacity(glyphs.len()), widths: HashMap::with_capacity(glyphs.len()) };
+    let mut names = Vec::new();
+    let mut glyphs = glyphs.into_iter();
+    loop {
+        let group: Vec<ShapedGlyph> = glyphs.by_ref().take(per_font).collect();
+        if group.is_empty() {
+            break;
+        }
+        for glyph in &group {
+            shaped.codes.insert(glyph.text.clone(), (names.len(), glyph.code));
+            shaped.widths.insert(glyph.text.clone(), glyph.width);
+        }
+        names.push(add_shaped_font(doc, fonts_res, family, info.map_or("Regular", |f| f.style), group));
+    }
+    Ok(Type3Fallback { family, names, widths: Vec::new(), codes: HashMap::new(), shaped: Some(shaped) })
+}
+
+/// Adds one generated font whose codes 1 to `glyphs.len()` show `glyphs` (clusters), and returns
+/// its resource name (`PCSh`, then `PCSh1`, ...). Nothing here can fail.
+fn add_shaped_font(doc: &mut Document, fonts_res: &mut Dict, family: &str, style: &str, glyphs: Vec<ShapedGlyph>) -> String {
+    let last_char = glyphs.len();
+    let mut charprocs = Dict::new();
+    let mut widths = Vec::with_capacity(last_char);
+    let mut differences = vec![Object::Int(1)];
+    let mut bbox = [0.0f64; 4];
+    let mut cmap = String::from(
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CMapType 2 def\n1 begincodespacerange\n<01> <FF>\nendcodespacerange\n",
+    );
+    // A CMap block holds at most 100 entries.
+    for block in glyphs.chunks(100) {
+        cmap.push_str(&format!("{} beginbfchar\n", block.len()));
+        for glyph in block {
+            let hex: String = glyph.text.encode_utf16().map(|u| format!("{u:04X}")).collect();
+            cmap.push_str(&format!("<{:02X}> <{hex}>\n", glyph.code));
+        }
+        cmap.push_str("endbfchar\n");
+    }
+    cmap.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+    for glyph in glyphs {
+        let glyph_name = format!("g{:02X}", glyph.code);
+        let mut pd = Dict::new();
+        pd.set(b"Length".to_vec(), glyph.path.len() as i64);
+        let proc_ref = doc.add(Object::Stream(Stream::from_raw(pd, glyph.path)));
+        charprocs.set(glyph_name.as_bytes().to_vec(), Object::Ref(proc_ref));
+        differences.push(Object::name(&glyph_name));
+        widths.push(Object::Real((glyph.width * 1000.0).round()));
+        bbox = [bbox[0].min(glyph.bbox[0]), bbox[1].min(glyph.bbox[1]), bbox[2].max(glyph.bbox[2]), bbox[3].max(glyph.bbox[3])];
+    }
+    let mut cmap_dict = Dict::new();
+    cmap_dict.set(b"Length".to_vec(), cmap.len() as i64);
+    let cmap_ref = doc.add(Object::Stream(Stream::from_raw(cmap_dict, cmap.into_bytes())));
+    let mut encoding = Dict::new();
+    encoding.set(b"Type".to_vec(), Object::name("Encoding"));
+    encoding.set(b"Differences".to_vec(), Object::Array(differences));
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type3"));
+    font.set(b"Name".to_vec(), Object::name(SHAPED_FONT_NAME));
+    let plain: String = family.chars().filter(char::is_ascii_alphanumeric).collect();
+    let mut descriptor = Dict::new();
+    descriptor.set(b"Type".to_vec(), Object::name("FontDescriptor"));
+    descriptor.set(b"FontName".to_vec(), Object::name(&format!("{plain}-{}", style.replace(' ', ""))));
+    descriptor.set(b"FontFamily".to_vec(), Object::String(PdfString::literal(family.as_bytes().to_vec())));
+    descriptor.set(b"Flags".to_vec(), Object::Int(4));
+    descriptor.set(b"ItalicAngle".to_vec(), Object::Int(0));
+    font.set(b"FontDescriptor".to_vec(), Object::Ref(doc.add(Object::Dict(descriptor))));
+    font.set(b"FontBBox".to_vec(), Object::Array(bbox.iter().map(|v| Object::Real(*v)).collect()));
+    font.set(
+        b"FontMatrix".to_vec(),
+        Object::Array(vec![Object::Real(0.001), Object::Int(0), Object::Int(0), Object::Real(0.001), Object::Int(0), Object::Int(0)]),
+    );
+    font.set(b"FirstChar".to_vec(), Object::Int(1));
+    font.set(b"LastChar".to_vec(), Object::Int(last_char as i64));
+    font.set(b"Widths".to_vec(), Object::Array(widths));
+    font.set(b"Encoding".to_vec(), Object::Dict(encoding));
+    font.set(b"CharProcs".to_vec(), Object::Dict(charprocs));
+    font.set(b"ToUnicode".to_vec(), Object::Ref(cmap_ref));
+    let mut name = String::from("PCSh");
+    let mut suffix = 0usize;
+    while fonts_res.contains(name.as_bytes()) {
+        suffix = suffix.saturating_add(1);
+        name = format!("PCSh{suffix}");
+    }
+    fonts_res.set(name.as_bytes().to_vec(), Object::Dict(font));
+    name
 }
 
 /// Whether a run shown in `font` (a resource name, and the Japanese or Hebrew fallback face it subsets, if
@@ -1084,6 +1321,8 @@ struct Type3Fallback {
     widths: Vec<(char, f64)>,
     /// Where each character is shown: the index of its font in `names`, and its code there.
     codes: HashMap<char, (usize, u8)>,
+    /// A shaped fallback's clusters, which then stand in for `widths` and `codes`.
+    shaped: Option<ShapedCodes>,
 }
 
 /// One glyph of a generated font: its code there, its character, its glyph procedure and advance.
@@ -1198,8 +1437,15 @@ fn type3_font(
     text: &str,
     family: crate::added::Family,
     bold: bool,
+    italic: bool,
+    source: &str,
     max_glyphs: usize,
 ) -> Result<Type3Fallback, EditError> {
+    // Thai, and a craft-fonts or installed family, are shaped: marks sit on their letters.
+    let shaped = shaped_faces(text, family, bold, italic, source);
+    if !shaped.is_empty() {
+        return shaped_font(doc, fonts_res, text, &shaped, max_glyphs);
+    }
     let (faces, hebrew) = type3_faces(text, family, bold)?;
     // Each unique character once, in order of first appearance.
     let mut chars = Vec::new();
@@ -1244,7 +1490,7 @@ fn type3_font(
         }
         names.push(add_type3_font(doc, fonts_res, face, hebrew, group));
     }
-    Ok(Type3Fallback { family: face.family, names, widths, codes })
+    Ok(Type3Fallback { family: face.family, names, widths, codes, shaped: None })
 }
 
 /// Adds one generated font whose codes 1 to `glyphs.len()` show `glyphs`, and returns its resource
@@ -1314,6 +1560,16 @@ fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, he
 /// a font is switched only where the text moves to another font. `None` if a character has no code.
 fn type3_encode(fallback: &Type3Fallback, text: &str) -> Option<Vec<(String, Vec<u8>)>> {
     let mut runs: Vec<(usize, Vec<u8>)> = Vec::new();
+    if let Some(shaped) = &fallback.shaped {
+        for cluster in clusters(text) {
+            let (font, code) = *shaped.codes.get(cluster)?;
+            match runs.last_mut() {
+                Some((last, bytes)) if *last == font => bytes.push(code),
+                _ => runs.push((font, vec![code])),
+            }
+        }
+        return runs.into_iter().map(|(font, bytes)| Some((fallback.names.get(font)?.clone(), bytes))).collect();
+    }
     for ch in text.chars() {
         let (font, code) = *fallback.codes.get(&ch)?;
         match runs.last_mut() {
@@ -1435,7 +1691,8 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
         None => {
             let fallback_shown = crate::bidi::to_visual(&text);
             if needs_type3(&text) {
-                let fallback = type3_font(doc, &mut fonts_res, &text, source_family(&target.base_font), target.bold, max_glyphs)?;
+                let fallback =
+                    type3_font(doc, &mut fonts_res, &text, source_family(&target.base_font), target.bold, target.italic, &target.base_font, max_glyphs)?;
                 let runs = type3_encode(&fallback, &fallback_shown)
                     .ok_or_else(|| EditError::Invalid(format!("\"{text}\" can't be shown by the {} fallback", fallback.family)))?;
                 let size = font_size_before(&ops, first).unwrap_or(target.size);
@@ -1682,8 +1939,22 @@ pub(crate) fn rewrite_block_with_limit(
         ));
     }
     let visual_indic = members.iter().any(|line| line.visual_order);
+    // Thai that none of the paragraph's fonts can show is drawn shaped by the single-style path
+    // below, each letter with its marks; the styled path places one character at a time.
+    let thai_fallback = style.ranges.is_empty() && style.resource.is_none() && {
+        let draft = text.unwrap_or(&b.text);
+        draft.chars().any(is_thai) && {
+            let own: Vec<Metrics> = members
+                .iter()
+                .filter_map(|line| fonts_res.get(line.font.as_bytes()).and_then(|f| doc.resolve(f).as_dict().cloned()))
+                .map(|d| Metrics::from_dict(doc, &d))
+                .collect();
+            draft.chars().filter(|c| !c.is_whitespace()).any(|c| !own.iter().any(|m| m.encode(&c.to_string()).is_some()))
+        }
+    };
     if !hebrew
         && !visual_indic
+        && !thai_fallback
         && (!style.ranges.is_empty()
             || style.resource.is_some()
             || (text.is_some_and(|draft| {
@@ -1728,7 +1999,11 @@ pub(crate) fn rewrite_block_with_limit(
         match family {
             crate::added::Family::Courier => s.chars().count() as f64 * 0.6 * size,
             crate::added::Family::Times => pdfcraft_fonts::helvetica_width(s, size) * 0.92,
-            crate::added::Family::Helvetica => pdfcraft_fonts::helvetica_width(s, size) * if bold { 1.05 } else { 1.0 },
+            // Edit text has no craft-fonts families: an Add Text family that reaches it measures as
+            // Helvetica.
+            crate::added::Family::Helvetica | crate::added::Family::Sarabun | crate::added::Family::Installed(_) => {
+                pdfcraft_fonts::helvetica_width(s, size) * if bold { 1.05 } else { 1.0 }
+            }
         }
     };
     let [dx, dy] = style.offset.unwrap_or([0.0, 0.0]);
@@ -1767,13 +2042,22 @@ pub(crate) fn rewrite_block_with_limit(
     } else {
         None
     };
-    let type3 = if !reuse && needs_type3(&text) { Some(type3_font(doc, &mut fonts_res, &text, family, bold, max_glyphs)?) } else { None };
+    // A craft-fonts or installed family draws all of its text from its own face, Latin too.
+    let own_face = family.craft(bold, italic).is_some();
+    let type3 = if !reuse && (needs_type3(&text) || own_face) {
+        // A chosen family replaces the text's font; otherwise the fallback may match it.
+        let source = if style.family.is_some() { "" } else { b.base_font.as_str() };
+        Some(type3_font(doc, &mut fonts_res, &text, family, bold, italic, source, max_glyphs)?)
+    } else {
+        None
+    };
     let advance = |s: &str| -> f64 {
         let t = match (&metrics, reuse) {
             (Some(m), true) => {
                 let visual_s = if m.visual_order { crate::indic::to_visual(s) } else { s.to_owned() };
                 source_width(m, &visual_s, size, space, o_state.char_spacing, o_state.word_spacing)
             }
+            _ if let Some(shaped) = type3.as_ref().and_then(|f| f.shaped.as_ref()) => shaped.width(s, size, o_state.char_spacing),
             _ if let Some(fallback) = &type3 => {
                 // Each character's count in `s`, from one pass over `s`.
                 let mut counts: HashMap<char, usize> = HashMap::new();

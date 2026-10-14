@@ -632,8 +632,8 @@ pub use text::{
 };
 pub mod added;
 pub use added::{
-    Added, AddedImage, AddedText, Align, Content, Family, MarkerScan, add_content, delete_content, first_undrawable, list_added, scan_markers,
-    update_content,
+    Added, AddedImage, AddedText, Align, Content, Family, MarkerScan, add_content, delete_content, first_undrawable, fitted_text, list_added,
+    scan_markers, text_is_wrapped, update_content,
 };
 
 #[cfg(test)]
