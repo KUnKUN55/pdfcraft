@@ -347,7 +347,7 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
 /// Whether the arrow keys move the selected added item or the Edit text selection (the page
 /// keeps still meanwhile).
 pub(crate) fn arrows_nudge(view: &DocView) -> bool {
-    view.content.selected.is_some() && view.content.draft.is_none() || view.objects.count() > 0
+    view.content.selected.is_some() && view.content.draft.is_none() || view.objects.count() > 0 || view.image_selection.is_some()
 }
 
 /// How far the arrow keys pressed this frame move the selected item, in points: one point a

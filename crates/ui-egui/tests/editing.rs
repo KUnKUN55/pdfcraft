@@ -2521,6 +2521,15 @@ fn check_existing_artwork(name: &'static str, bytes: Vec<u8>) {
     let moved = doc.page_images(0)[0].rect;
     let dx = moved[0] - before[0];
     assert!((dx - (before[2] - before[0]) / 4.0).abs() < 1.5, "moved {dx} pt: {before:?} → {moved:?}");
+    // Still selected: → moves it one point right, Shift+↓ ten points down the page.
+    h.key_press(Key::ArrowRight);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowDown);
+    h.run_steps(4);
+    let nudged = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    assert!((nudged[0] - moved[0] - 1.0).abs() < 0.05 && (nudged[1] - moved[1] + 10.0).abs() < 0.05, "{moved:?} → {nudged:?}");
+    assert!((nudged[2] - nudged[0] - (moved[2] - moved[0])).abs() < 0.05, "nudging keeps the size");
+    assert_eq!(h.state().views[0].current, 0, "the arrows moved the image, not the page");
     // Delete with the Delete key.
     h.key_press(egui::Key::Delete);
     h.run_steps(4);

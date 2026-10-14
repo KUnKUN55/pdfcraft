@@ -3255,6 +3255,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     if tool == QuickTool::EditText {
         crate::object_ui::keys(ui.ctx(), view, doc);
+    } else {
+        // Outside Edit text nothing shows a selected image, so the arrow keys are the page's again.
+        view.image_selection = None;
     }
     if stamp_placed {
         tool = QuickTool::Select;
