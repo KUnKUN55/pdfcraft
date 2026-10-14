@@ -173,6 +173,13 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
         }
         return false;
     }
+    // A click in the open paragraph editor places its caret (edit_text_ui::overlay); it must not
+    // select the paragraph under it, which would close the editor.
+    if view.line_editor.as_ref().is_some_and(|e| e.page == page)
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| ui.ctx().layer_id_at(p).is_some_and(|l| l.id == egui::Id::new("edit-text-line")))
+    {
+        return false;
+    }
     let mut selection = std::mem::take(&mut view.objects);
     let result = input(&mut selection, ui, resp, xf, page, doc, view);
     view.objects = selection;

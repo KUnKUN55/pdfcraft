@@ -2635,6 +2635,45 @@ fn one_click_selects_a_paragraph_the_arrows_move_it_and_a_double_click_opens_it(
 
 /// Two clicks in a row at `at`: in Edit text, one click selects a paragraph and a double click
 /// opens it for typing.
+#[test]
+fn a_click_in_the_open_editor_places_the_caret_and_keeps_it_open() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    double_click(&mut h, at);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some());
+    // The editor's own galley: click in the middle of each letter; the caret lands beside it.
+    let (pos, galley) = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Page 1" => Some((t.pos, t.galley.clone())),
+            _ => None,
+        })
+        .expect("the editor draws the paragraph");
+    let row = &galley.rows[0];
+    let id = egui::Id::new("edit-text-line-input");
+    for (i, g) in row.row.glyphs.iter().enumerate().filter(|(_, g)| g.advance_width > 1.0) {
+        let p = egui::pos2(pos.x + row.pos.x + g.pos.x + g.advance_width * 0.25, pos.y + row.pos.y + row.row.size.y / 2.0);
+        let start = h.ctx.input(|inp| inp.time) + 1.0;
+        for (k, pressed) in [true, false].into_iter().enumerate() {
+            let input = h.input_mut();
+            input.time = Some(start + 0.03 * (k + 1) as f64);
+            input.events.push(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            h.step();
+        }
+        h.run_steps(1);
+        assert!(h.state().views[0].line_editor.is_some(), "a click in the editor must not select the paragraph and close it");
+        let caret = egui::TextEdit::load_state(&h.ctx, id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
+        assert_eq!(caret, Some(i), "a click on the left of letter {i} puts the caret before it");
+    }
+}
 /// The harness steps a quarter second a frame, longer than egui's double-click window, so the
 /// four button events carry their own, closer, times; a second apart from any earlier click, so
 /// two double clicks in a row don't count as a triple click.
