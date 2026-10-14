@@ -38,4 +38,5 @@ try {
 } finally {
     Pop-Location
 }
-Write-Output "Built: $(Join-Path $Root 'target\release')"
+$TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Root 'target' }
+Write-Output "Built: $(Join-Path $TargetDir 'release')"
