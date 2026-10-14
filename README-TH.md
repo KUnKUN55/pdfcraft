@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File thai\build-windows.ps1
 ถ้าต้องการทำตัวติดตั้งและไฟล์ portable ด้วย ให้ติดตั้ง WiX v5 (`winget install WiXToolset.WiXCLI --version 5.0.2.0`) แล้วสั่ง:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.7.1-th.2
+powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.7.1-th.1
 ```
 
 ไฟล์จะอยู่ที่ `dist\release`
