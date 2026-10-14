@@ -35,18 +35,11 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 .corner_radius(CornerRadius::same(12))
                 .inner_margin(egui::Margin::same(14))
                 .show(ui, |ui| {
+                    // Unofficial edition: no ArtCraft marks or community card (docs/brand/LICENSE-brand.txt);
+                    // questions about this build go to its own repository.
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        widgets::artcraft_mark(ui, 28.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(tl!("Join the ArtCraft community")).font(theme::semibold(15.0)));
-                            ui.label(egui::RichText::new(tl!("Get help, share feedback and follow development on Discord.")).color(t.text_muted));
-                        });
-                    });
-                    ui.add_space(8.0);
-                    if let Some(cmd) = widgets::community_links(ui) {
-                        app.execute(cmd);
-                    }
+                    ui.label(egui::RichText::new(crate::THAI_EDITION_NOTE).font(theme::semibold(15.0)));
+                    ui.hyperlink(crate::THAI_EDITION_URL);
                 });
             ui.add_space(22.0);
 

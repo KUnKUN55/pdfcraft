@@ -22,6 +22,11 @@ macro_rules! tl_ctx {
     };
 }
 
+/// Shown on the home screen and in About in place of the ArtCraft marks, which modified versions
+/// must not carry (docs/brand/LICENSE-brand.txt).
+pub(crate) const THAI_EDITION_NOTE: &str = "PdfCraft ภาษาไทย (ฉบับไม่เป็นทางการ) · ต่อยอดจาก PdfCraft โดยทีม ArtCraft";
+pub(crate) const THAI_EDITION_URL: &str = "https://github.com/mixlnwuu/pdfcraft";
+
 mod a11y_ui;
 mod actions_ui;
 mod appearance;
