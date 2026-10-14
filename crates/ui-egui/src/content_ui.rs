@@ -344,14 +344,15 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
     }
 }
 
-/// Whether the arrow keys move the selected added item (the page keeps still meanwhile).
+/// Whether the arrow keys move the selected added item or the Edit text selection (the page
+/// keeps still meanwhile).
 pub(crate) fn arrows_nudge(view: &DocView) -> bool {
-    view.content.selected.is_some() && view.content.draft.is_none()
+    view.content.selected.is_some() && view.content.draft.is_none() || view.objects.count() > 0
 }
 
 /// How far the arrow keys pressed this frame move the selected item, in points: one point a
 /// press, ten with Shift. Each press is one undo step.
-fn nudge(ctx: &egui::Context) -> Option<[f64; 2]> {
+pub(crate) fn nudge(ctx: &egui::Context) -> Option<[f64; 2]> {
     use egui::Key;
     ctx.input(|i| {
         if i.modifiers.command || i.modifiers.alt {

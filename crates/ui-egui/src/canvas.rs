@@ -3253,6 +3253,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else {
         view.links.selected = None;
     }
+    if tool == QuickTool::EditText {
+        crate::object_ui::keys(ui.ctx(), view, doc);
+    }
     if stamp_placed {
         tool = QuickTool::Select;
     }

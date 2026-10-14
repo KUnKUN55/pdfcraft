@@ -2252,12 +2252,11 @@ fn clicking_existing_text_selects_its_source_font_style() {
     let serif = click(25.0, 228.0);
     h.hover_at(serif);
     h.run_steps(1);
-    h.drag_at(serif);
-    h.run_steps(1);
-    h.drop_at(serif);
+    double_click(&mut h, serif);
     h.run_steps(3);
     let ed = h.state().views[0].line_editor.clone().expect("serif editor opens");
-    assert_eq!(ed.look.family, pdfcraft_engine::FontFamily::Times);
+    // The standard family, or the installed font that matches it (Times New Roman on Windows).
+    assert!(ed.look.family.label().starts_with("Times"), "{:?}", ed.look.family);
     assert!(ed.look.bold && ed.look.italic, "source style: {:?}", ed.look);
 
     h.key_press(egui::Key::Escape);
@@ -2265,12 +2264,10 @@ fn clicking_existing_text_selects_its_source_font_style() {
     let mono = click(25.0, 128.0);
     h.hover_at(mono);
     h.run_steps(1);
-    h.drag_at(mono);
-    h.run_steps(1);
-    h.drop_at(mono);
+    double_click(&mut h, mono);
     h.run_steps(3);
     let ed = h.state().views[0].line_editor.clone().expect("mono editor opens");
-    assert_eq!(ed.look.family, pdfcraft_engine::FontFamily::Courier);
+    assert!(ed.look.family.label().starts_with("Courier"), "{:?}", ed.look.family);
     assert!(!ed.look.bold && ed.look.italic, "source style: {:?}", ed.look);
 }
 
@@ -2283,9 +2280,7 @@ fn deleting_a_draft_does_not_show_the_original_text_underneath() {
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + 142.0 / 300.0 * r.height());
     h.hover_at(at);
     h.run_steps(1);
-    h.drag_at(at);
-    h.run_steps(1);
-    h.drop_at(at);
+    double_click(&mut h, at);
     h.run_steps(3);
     h.state_mut().views[0].line_editor.as_mut().unwrap().text.clear();
     for _ in 0..100 {
@@ -2339,9 +2334,7 @@ fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line
         let point = egui::pos2(page.left() + 25.0 / 300.0 * page.width(), page.top() + (300.0 - y) / 300.0 * page.height());
         h.hover_at(point);
         h.run_steps(1);
-        h.drag_at(point);
-        h.run_steps(1);
-        h.drop_at(point);
+        double_click(&mut h, point);
         h.run_steps(4);
         if y == 128.0 {
             assert_eq!(h.state().views[0].line_editor.as_ref().unwrap().text, "Mono\nText", "opening a paragraph keeps its source line breaks");
@@ -2387,9 +2380,7 @@ fn editing_existing_text_in_place() {
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
     h.hover_at(at);
     h.run_steps(1);
-    h.drag_at(at);
-    h.run_steps(1);
-    h.drop_at(at);
+    double_click(&mut h, at);
     h.run_steps(3);
     let ed = h.state().views[0].line_editor.clone().expect("the line opens for editing");
     assert_eq!((ed.page, ed.block, ed.text.as_str()), (0, 0, "Page 1"));
@@ -2449,9 +2440,7 @@ fn editing_a_double_drawn_line_replaces_every_copy() {
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
     h.hover_at(at);
     h.run_steps(1);
-    h.drag_at(at);
-    h.run_steps(1);
-    h.drop_at(at);
+    double_click(&mut h, at);
     h.run_steps(3);
     let ed = h.state().views[0].line_editor.clone().expect("the line opens for editing");
     assert_eq!(ed.text, "Page 1");
@@ -2547,9 +2536,7 @@ fn the_format_panel_restyles_the_paragraph_being_edited() {
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
     h.hover_at(at);
     h.run_steps(1);
-    h.drag_at(at);
-    h.run_steps(1);
-    h.drop_at(at);
+    double_click(&mut h, at);
     h.run_steps(3);
     assert!(h.state().views[0].line_editor.is_some());
     // The Format text panel shows the paragraph's look; making it bold applies at once.
@@ -2579,9 +2566,7 @@ fn selected_text_formatting_keeps_the_rest_of_the_paragraph_and_reopens() {
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
     h.hover_at(at);
     h.run_steps(1);
-    h.drag_at(at);
-    h.run_steps(1);
-    h.drop_at(at);
+    double_click(&mut h, at);
     h.run_steps(4);
     h.key_press_modifiers(Modifiers::COMMAND, Key::ArrowRight);
     h.run_steps(1);
@@ -2602,6 +2587,58 @@ fn selected_text_formatting_keeps_the_rest_of_the_paragraph_and_reopens() {
 }
 
 /// Drag with the pointer from `from` to `to` in a few steps.
+#[test]
+fn one_click_selects_a_paragraph_the_arrows_move_it_and_a_double_click_opens_it() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    let rect = |h: &Harness<'static, PdfCraftApp>| dragged_paragraphs(h)[0].rect;
+    let before = rect(&h);
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_none(), "one click selects, it doesn't open the paragraph");
+    h.get_by_label("Drag the selection to move it. Esc clears the selection.");
+    // → moves one point right; Shift+↑ ten points up the page. Each press is one undo step.
+    h.key_press(Key::ArrowRight);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowUp);
+    h.run_steps(4);
+    let after = rect(&h);
+    assert!((after[0] - before[0] - 1.0).abs() < 0.01 && (after[1] - before[1] - 10.0).abs() < 0.01, "{before:?} → {after:?}");
+    assert_eq!(dragged_paragraphs(&h)[0].text, "Page 1", "moving keeps the text");
+    assert_eq!(h.state().views[0].current, 0, "the arrows moved the paragraph, not the page");
+    // Still selected after the moves; a double click on it opens it for typing.
+    h.get_by_label("Drag the selection to move it. Esc clears the selection.");
+    let r = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = egui::pos2(r.left() + (40.0 + 1.0) / 200.0 * r.width(), r.top() + (300.0 - 168.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    double_click(&mut h, at);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Page 1"));
+}
+
+/// Two clicks in a row at `at`: in Edit text, one click selects a paragraph and a double click
+/// opens it for typing.
+/// The harness steps a quarter second a frame, longer than egui's double-click window, so the
+/// four button events carry their own, closer, times; a second apart from any earlier click, so
+/// two double clicks in a row don't count as a triple click.
+fn double_click(h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2) {
+    let start = h.ctx.input(|i| i.time) + 1.0;
+    for (k, pressed) in [true, false, true, false].into_iter().enumerate() {
+        let input = h.input_mut();
+        input.time = Some(start + 0.03 * (k + 1) as f64);
+        input.events.push(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.step();
+    }
+}
+
 fn drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2) {
     h.hover_at(from);
     h.run_steps(1);
@@ -2712,6 +2749,12 @@ fn drag_paragraph(h: &mut Harness<'static, PdfCraftApp>, text: &str, offset: [f6
     assert!(h.state().views[0].line_editor.is_none());
     drag(h, from, to);
     assert!(h.state().views[0].line_editor.is_none(), "a body drag must not open the typing editor");
+    // The moved paragraph stays selected (for the arrow keys) until Esc, unless the move left it
+    // ambiguous (identical overlapping labels), which clears the selection.
+    if h.query_by_label("Drag the selection to move it. Esc clears the selection.").is_some() {
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+    }
     h.get_by_label("Shift-click to select several objects. Drag empty space to select an area.");
 }
 
@@ -3016,7 +3059,8 @@ fn an_ordinary_paragraph_drag_cannot_reuse_an_index_after_an_edit() {
     h.run_steps(1);
     h.hover_at(to);
     h.run_steps(2);
-    assert!(h.state().views[0].block_drag.is_some());
+    // The paragraph is held by the object selection's move gesture (one click selects it).
+    h.get_by_label("Drag the selection to move it. Esc clears the selection.");
     let id = h.state().views[0].id;
     h.state_mut()
         .session
@@ -3327,9 +3371,7 @@ fn one_editor_contains_mixed_styles_and_visual_rows() {
     let point = egui::pos2(page.left() + 30.0 / 300.0 * page.width(), page.top() + 55.0 / 300.0 * page.height());
     h.hover_at(point);
     h.run_steps(1);
-    h.drag_at(point);
-    h.run_steps(1);
-    h.drop_at(point);
+    double_click(&mut h, point);
     h.run_steps(6);
     assert_eq!(h.state().views[0].line_editor.as_ref().unwrap().text, "Heading\nPlain bold words\nLast row");
     let galley = h
@@ -3538,9 +3580,7 @@ fn inline_editor_preserves_source_font_and_previews_live_bounds() {
     let point = egui::pos2(page.left() + 30.0 * scale, page.top() + 75.0 * scale);
     h.hover_at(point);
     h.run_steps(1);
-    h.drag_at(point);
-    h.run_steps(1);
-    h.drop_at(point);
+    double_click(&mut h, point);
     h.run_steps(8);
     assert!(!h.state().views[0].line_editor.as_ref().unwrap().overflow);
     let shape = h
@@ -3674,9 +3714,7 @@ fn cropped_images_do_not_intercept_text_and_stay_inside_each_page() {
             let p = at(x, y);
             h.hover_at(p);
             h.run_steps(1);
-            h.drag_at(p);
-            h.run_steps(1);
-            h.drop_at(p);
+            double_click(&mut h, p);
             h.run_steps(3);
             assert_eq!(h.state().views[0].line_editor.as_ref().unwrap().text, label);
             assert!(h.state().views[0].image_selection.is_none(), "text wins even inside the visible artwork");

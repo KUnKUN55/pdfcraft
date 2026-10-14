@@ -113,6 +113,14 @@ fn screen(xf: &PageXform, info: &DocInfo, page: usize, object: &EditableObject) 
     xf.user_rect(info, page, object.rect.map(|v| v as f32))
 }
 
+/// A paragraph's left and right edges rewrap it (edit_text_ui), so a press there is not a
+/// selection or a move. As there, only on an upright page.
+fn on_text_edge(xf: &PageXform, info: &DocInfo, page: usize, object: &EditableObject, p: Pos2) -> bool {
+    object.target.kind == ObjectKind::Text
+        && info.pages.get(page).is_some_and(|pg| pg.rotation % 180 == 0)
+        && crate::edit_text_ui::on_rewrap_edge(screen(xf, info, page, object).expand(2.0), p)
+}
+
 fn modified(ui: &egui::Ui) -> bool {
     ui.input(|i| {
         let modifiers = i
@@ -239,10 +247,14 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
     if !pressed {
         if s.page == Some(page) && !s.selected.is_empty() {
             let union = s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o)));
-            if union.contains(p) {
+            let edge = s.selected.len() == 1 && on_text_edge(xf, info, page, &s.selected[0], p);
+            if union.contains(p) && !edge {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                return true;
             }
-            return true;
+            // Elsewhere the other paragraphs keep their outlines and hover highlight; a press
+            // still comes here first.
+            return s.selected.len() > 1;
         }
         return false;
     }
@@ -289,13 +301,25 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
     }
     if s.page == Some(page) && !s.selected.is_empty() {
         let union = s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o)));
-        if union.contains(p) && !resp.double_clicked() {
+        let edge = s.selected.len() == 1 && on_text_edge(xf, info, page, &s.selected[0], p);
+        if union.contains(p) && !edge && !resp.double_clicked() {
             s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false });
             return true;
         }
     }
     s.clear();
-    if hit.is_some() {
+    if let Some(object) = hit {
+        // One click selects a paragraph, which a drag or the arrow keys then move; a double click
+        // (released over the selection, above) opens it for typing. Its edges stay the rewrap
+        // handles.
+        if object.target.kind == ObjectKind::Text && !resp.double_clicked() && !on_text_edge(xf, info, page, object, p) {
+            leave_single(view);
+            s.page = Some(page);
+            s.selected.push(object.clone());
+            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false });
+            view.current = page;
+            return true;
+        }
         return false;
     }
     leave_single(view);
@@ -303,6 +327,30 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
     s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: false });
     view.current = page;
     true
+}
+
+/// The arrow keys move the selection one point a press, ten with Shift; each press is one edit.
+pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, doc: &Document) {
+    let s = &view.objects;
+    let Some(page) = s.page else { return };
+    if s.selected.is_empty() || s.gesture.is_some() || s.input_blocked || view.pending_edit.is_some() || ctx.egui_wants_keyboard_input() {
+        return;
+    }
+    // nudge() is in display space (y up the page); the view's y grows down it.
+    let Some([dx, dy]) = crate::content_ui::nudge(ctx) else { return };
+    match doc.object_move_offset(page, [dx, -dy]) {
+        Ok(offset) => {
+            let s = &mut view.objects;
+            let mut expected = s.selected.clone();
+            for object in &mut expected {
+                object.rect = [object.rect[0] + offset[0], object.rect[1] + offset[1], object.rect[2] + offset[0], object.rect[3] + offset[1]];
+            }
+            let objects = s.selected.iter().map(|o| o.target).collect();
+            s.pending = Some(expected);
+            view.pending_edit = Some(Edit::MoveObjects { page, objects, offset });
+        }
+        Err(_) => view.objects.notice = Some(tl!("These objects could not be moved. Select them again and try a smaller move.").into()),
+    }
 }
 
 pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, selection: &ObjectSelection) {

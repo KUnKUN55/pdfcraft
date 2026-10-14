@@ -386,6 +386,11 @@ fn edge_at(b: Rect, p: Pos2) -> Option<Grip> {
     }
 }
 
+/// Whether `p` takes the rewrap handle on the left or right edge of the paragraph box `b`.
+pub(crate) fn on_rewrap_edge(b: Rect, p: Pos2) -> bool {
+    edge_at(b, p).is_some()
+}
+
 /// The topmost box under `p` and what it grabs there; edges only on an upright page.
 fn grab_at(boxes: &[Rect], p: Pos2, upright: bool) -> Option<(usize, Grip)> {
     boxes.iter().enumerate().rev().find_map(|(i, b)| match upright.then(|| edge_at(*b, p)).flatten() {
