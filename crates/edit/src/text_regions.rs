@@ -161,13 +161,51 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     blocks
 }
 
+/// Whether the paragraph's own font `name` (or a registered full face of it) can shape `text`:
+/// an embedded TrueType/OpenType face whose character map covers it. Subset fonts that word
+/// processors embed often can't (no usable cmap, or only the letters the document already had).
+pub(super) fn source_shapes(doc: &Document, fonts: &Dict, name: &str, text: &str) -> bool {
+    matches!(shape_own(doc, fonts, name, text), Ok(Some(_)))
+}
+
+type Shaped = (Vec<u8>, pdfcraft_fonts::source_shaping::ShapedRun, String);
+
 /// Shape in the source or an explicitly registered matching full face. Never use interface fonts.
-fn shape_source(
-    doc: &Document,
-    fonts: &Dict,
-    name: &str,
-    text: &str,
-) -> Result<Option<(Vec<u8>, pdfcraft_fonts::source_shaping::ShapedRun, String)>, EditError> {
+/// Thai the source can't shape (word processors embed subsets without a usable character map)
+/// takes a complete document face instead: the installed font the source names, else TH Sarabun
+/// PSK, embedded whole so later edits can add letters.
+fn shape_source(doc: &Document, fonts: &Dict, name: &str, text: &str) -> Result<Option<Shaped>, EditError> {
+    match shape_own(doc, fonts, name, text) {
+        Err(e) if text.chars().any(is_thai) => {
+            let family = fonts.get(name.as_bytes()).and_then(|f| doc.dict(f)).map(|d| Metrics::from_dict(doc, &d).base_font).unwrap_or_default();
+            thai_face(&family, text).map(Some).ok_or(e)
+        }
+        other => other,
+    }
+}
+
+/// A complete Thai document face for a source font that can't shape `text`, in its style.
+fn thai_face(base_font: &str, text: &str) -> Option<Shaped> {
+    let lower = base_font.to_ascii_lowercase();
+    let (bold, italic) = (lower.contains("bold"), lower.contains("italic") || lower.contains("oblique"));
+    let installed = pdfcraft_fonts::installed_family_like(base_font).and_then(|family| {
+        let face = pdfcraft_fonts::installed_face(family, bold, italic)?;
+        Some((face, pdfcraft_fonts::installed_families().get(usize::from(family))?.name.to_string()))
+    });
+    let sarabun = pdfcraft_fonts::document_family_font("TH Sarabun PSK", bold, italic).map(|face| (face, "TH Sarabun PSK".to_string()));
+    installed.into_iter().chain(sarabun).find_map(|(face, family)| {
+        // A face inside a collection can't be embedded as one TrueType program.
+        let (bytes, 0) = pdfcraft_fonts::face_data(face)? else { return None };
+        if !pdfcraft_fonts::embedding::covers(bytes, text) || pdfcraft_fonts::embedding::validate(bytes).is_err() {
+            return None;
+        }
+        let shaped = pdfcraft_fonts::source_shaping::shape(bytes, text).ok()?;
+        Some((bytes.to_vec(), shaped, family))
+    })
+}
+
+/// Shape in the paragraph's own embedded face (or a registered full face of the same family).
+fn shape_own(doc: &Document, fonts: &Dict, name: &str, text: &str) -> Result<Option<Shaped>, EditError> {
     if !pdfcraft_fonts::source_shaping::required(text) {
         return Ok(None);
     }
@@ -522,9 +560,27 @@ pub(super) fn rewrite_styled_block(
     if !row.is_empty() {
         rows.push(row);
     }
+    // A Thai vowel or tone mark is drawn with its letter: it takes the letter's run and style even
+    // where the edit's alignment with the source gave it the neighbouring run's.
+    for row in &mut rows {
+        for i in 1..row.len() {
+            if is_thai(row[i].0) && joins_previous(row[i].0) {
+                let (line, font) = (row[i - 1].1, row[i - 1].2.clone());
+                row[i].1 = line;
+                row[i].2 = font;
+            }
+        }
+    }
     for row in &rows {
         let text: String = row.iter().map(|v| v.0).collect();
-        if pdfcraft_fonts::source_shaping::required(&text) && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2)) {
+        // Thai shapes within each style run: no letter joins across a run boundary, so a row may
+        // change style or font between Thai clusters (not inside one, before a vowel or tone mark).
+        let thai_runs = text.chars().all(|c| is_thai(c) || !pdfcraft_fonts::source_shaping::required(&c.to_string()))
+            && row.windows(2).all(|w| (w[0].1 == w[1].1 && w[0].2 == w[1].2) || !joins_previous(w[1].0));
+        if pdfcraft_fonts::source_shaping::required(&text)
+            && !thai_runs
+            && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2))
+        {
             return Err(EditError::Invalid(
                 "contextual/bidi text across font or style boundaries needs a uniform full-face row; mixed contextual runs are not yet supported"
                     .into(),

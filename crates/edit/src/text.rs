@@ -1940,7 +1940,10 @@ pub(crate) fn rewrite_block_with_limit(
     }
     let visual_indic = members.iter().any(|line| line.visual_order);
     // Thai that none of the paragraph's fonts can show is drawn shaped by the single-style path
-    // below, each letter with its marks; the styled path places one character at a time.
+    // below, each letter with its marks; the styled path places one character at a time. So is
+    // Thai the paragraph's fonts can encode but not shape (an embedded subset without a usable
+    // character map): the styled path would refuse it ("complex text needs the complete source
+    // TrueType/OpenType face").
     let thai_fallback = style.ranges.is_empty() && style.resource.is_none() && {
         let draft = text.unwrap_or(&b.text);
         draft.chars().any(is_thai) && {
@@ -1949,7 +1952,9 @@ pub(crate) fn rewrite_block_with_limit(
                 .filter_map(|line| fonts_res.get(line.font.as_bytes()).and_then(|f| doc.resolve(f).as_dict().cloned()))
                 .map(|d| Metrics::from_dict(doc, &d))
                 .collect();
-            draft.chars().filter(|c| !c.is_whitespace()).any(|c| !own.iter().any(|m| m.encode(&c.to_string()).is_some()))
+            let unencodable = draft.chars().filter(|c| !c.is_whitespace()).any(|c| !own.iter().any(|m| m.encode(&c.to_string()).is_some()));
+            let flat = draft.replace(['\n', '\r'], " ");
+            unencodable || !members.iter().any(|line| regions::source_shapes(doc, &fonts_res, &line.font, &flat))
         }
     };
     if !hebrew
@@ -1990,7 +1995,14 @@ pub(crate) fn rewrite_block_with_limit(
     let metrics = fonts_res.get(font_name.as_bytes()).and_then(|f| doc.resolve(f).as_dict().cloned()).map(|d| Metrics::from_dict(doc, &d));
     let visual_indic = metrics.as_ref().is_some_and(|m| m.visual_order) || first.visual_order;
     let indic_text = if visual_indic { crate::indic::to_visual(&text) } else { text.clone() };
-    let reuse = style.family.is_none() && style.bold.is_none() && metrics.as_ref().is_some_and(|m| source_encodes(m, &indic_text));
+    // Thai written in the paragraph's own font must be shaped by it (its marks placed with the
+    // letters); a subset that can encode the letters but not shape them would stack tone marks on
+    // vowels, so the shaped fallback (the matching installed face, else TH Sarabun) draws it.
+    let unshaped_thai = text.chars().any(is_thai) && !regions::source_shapes(doc, &fonts_res, &font_name, &text.replace(['\n', '\r'], " "));
+    let reuse = style.family.is_none()
+        && style.bold.is_none()
+        && !unshaped_thai
+        && metrics.as_ref().is_some_and(|m| source_encodes(m, &indic_text));
     let space = metrics.as_ref().map_or(0.33, |m| source_space(doc, &fonts_res, m));
     // The chosen style also determines the real Japanese fallback outlines and advances.
     let (family, bold, italic) = style.family.unwrap_or((source_family(&b.base_font), b.bold, b.italic));
