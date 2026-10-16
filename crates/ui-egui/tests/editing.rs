@@ -4286,3 +4286,28 @@ fn tooltips_open_below_the_pointer() {
     let tip = h.query_all_by_label_contains("— edit.text").next().expect("the row's tooltip shows").rect();
     assert!(tip.top() >= at.y + 20.0, "the tooltip {tip:?} opens below the pointer at {at:?}, past the cursor");
 }
+
+/// Thai edition: Bold or Italic with the whole paragraph selected styles the paragraph (so a
+/// Thai paragraph keeps its own installed face); with part of it selected, only that part.
+#[test]
+fn a_whole_paragraph_selection_styles_the_paragraph() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    double_click(&mut h, at);
+    h.run_steps(3);
+    let mut ed = h.state().views[0].line_editor.clone().expect("the line opens for editing");
+    ed.look.italic = true;
+    ed.selection = Some(0..ed.text.len());
+    let whole = ed.style();
+    assert!(whole.ranges.is_empty(), "the whole paragraph: no range");
+    assert_eq!(whole.family.map(|f| f.2), Some(true), "italic for the paragraph");
+    ed.selection = Some(0..4);
+    let part = ed.style();
+    assert_eq!(part.ranges.len(), 1, "part of it: a range");
+    assert!(part.family.is_none());
+}

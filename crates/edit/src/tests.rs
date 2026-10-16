@@ -3187,6 +3187,39 @@ fn a_range_in_a_craft_family_draws_from_its_face() {
     }
 }
 
+/// Thai edition: Thai in a selected range set in a craft-fonts family is shaped from that
+/// family's complete face in the asked style (it was drawn one letter at a time and refused:
+/// "complex text needs the complete source TrueType/OpenType face").
+#[test]
+fn thai_in_a_styled_range_is_shaped_in_the_chosen_face() {
+    if crate::added::Family::Sarabun.craft(false, true).is_none() {
+        return;
+    }
+    let mut doc = mixed_region_page();
+    let block = text::text_blocks(&doc, 0).unwrap()[1].clone();
+    let draft = format!("{} สวัสดี", block.editor_text);
+    let start = draft.find("สวัสดี").unwrap();
+    let style = BlockStyle {
+        ranges: vec![RangeStyle {
+            range: start..draft.len(),
+            family: Some((Family::Sarabun, false, true)),
+            resource: None,
+            size: None,
+            color: None,
+            underline: None,
+            char_spacing: None,
+            scale: None,
+        }],
+        ..Default::default()
+    };
+    text::rewrite_block(&mut doc, 0, 1, Some(&draft), &style).expect("the styled Thai range is written");
+    doc = reopen(&doc);
+    // One shaped run, in the italic face: drawn a letter at a time, its marks came apart.
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let thai = lines.iter().find(|l| l.text.contains("สวัสดี")).unwrap_or_else(|| panic!("the Thai is one run: {lines:?}"));
+    assert!(thai.italic, "in the italic face: {}", thai.base_font);
+}
+
 #[test]
 fn centered_mixed_size_title_keeps_three_rows_when_changed() {
     let mut doc = mixed_region_page();

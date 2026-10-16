@@ -201,7 +201,9 @@ impl LineEditor {
             scale: (self.extras.scale != self.extras0.scale).then_some(self.extras.scale),
             ..Default::default()
         };
-        if let Some(range) = &self.selection
+        // A selection of the whole paragraph styles the paragraph: that keeps a Thai paragraph in
+        // its own installed face (a part of one is shaped from a face it can embed whole).
+        if let Some(range) = self.selection.as_ref().filter(|r| !(r.start == 0 && r.end >= self.text.len()))
             && (style.family.is_some()
                 || style.resource.is_some()
                 || style.size.is_some()

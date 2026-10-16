@@ -349,7 +349,10 @@ pub(super) fn rewrite_styled_block(
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let mut fonts = res.get(b"Font").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
-    for (_, line) in lines.iter().enumerate().filter(|(i, line)| line.font.starts_with("PCRange") && !own_faces.contains_key(i)) {
+    // A run in a craft-fonts or installed family keeps this dictionary too: its Thai is shaped
+    // from the family's complete face in the asked style through it (shape_source), while its
+    // other letters draw from the face below.
+    for line in lines.iter().filter(|line| line.font.starts_with("PCRange")) {
         let mut f = Dict::new();
         f.set(b"Type".to_vec(), Object::name("Font"));
         f.set(b"Subtype".to_vec(), Object::name("Type1"));
@@ -405,6 +408,9 @@ pub(super) fn rewrite_styled_block(
                     return Err(EditError::Invalid(format!("the selected font resource {resource} cannot show U+{:04X}", u32::from(ch))));
                 }
                 resource.clone()
+            } else if own_faces.contains_key(&index) && pdfcraft_fonts::source_shaping::required(&s) {
+                // Thai and other shaped scripts: shaped as a run in the family's complete face.
+                source.font.clone()
             } else if let Some(&(family, bold, italic)) = own_faces.get(&index) {
                 let key = (format!("own:{}", family.base_font(bold, italic)), ch);
                 if let Some(name) = fallback_names.get(&key) {

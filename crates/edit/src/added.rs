@@ -520,7 +520,11 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
         for c in text.chars().filter(|c| !is_bidi_control(*c)) {
             let own = craft.filter(|face| pdfcraft_fonts::face_has(*face, c));
             let script = if is_thai(c) {
-                (Some(own.unwrap_or(ShapedScript::Thai)), true)
+                // Thai the family has no letters for is drawn in TH Sarabun PSK, in the item's
+                // weight and slant (Thai edition: it was always the upright regular face).
+                let styled =
+                    (t.bold || t.italic).then(|| Family::Sarabun.craft(t.bold, t.italic)).flatten().filter(|face| pdfcraft_fonts::face_has(*face, c));
+                (Some(own.or(styled).unwrap_or(ShapedScript::Thai)), true)
             } else if is_arabic(c) || (run_rtl && !c.is_alphanumeric() && pdfcraft_fonts::arabic_has(c)) {
                 (Some(ShapedScript::Arabic), false)
             } else {
@@ -1294,3 +1298,32 @@ fn drop_fonts(doc: &Document, res: &mut Dict, names: &[Vec<u8>]) {
 
 #[cfg(test)]
 mod arabic_tests;
+
+#[cfg(test)]
+mod thai_style_tests {
+    use super::*;
+
+    fn thai_scripts(t: &AddedText) -> Vec<ShapedScript> {
+        let (pieces, _) = shaped_layout(t, &t.text, false).unwrap();
+        pieces
+            .iter()
+            .flat_map(|p| match p {
+                Piece::Shaped(clusters) => clusters.iter().map(|c| c.script).collect(),
+                Piece::Latin(_) => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Thai edition: Thai in a family with no Thai letters (Helvetica, an installed Latin font)
+    /// takes TH Sarabun PSK in the item's weight and slant; it was always the upright regular face.
+    #[test]
+    fn thai_in_a_latin_family_follows_bold_and_italic() {
+        let Some(bold_italic) = Family::Sarabun.craft(true, true) else { return };
+        let mut t = AddedText { text: "สวัสดี".into(), family: Family::Helvetica, ..AddedText::default() };
+        assert!(thai_scripts(&t).iter().all(|s| *s == ShapedScript::Thai), "regular stays the document Thai face");
+        t.bold = true;
+        t.italic = true;
+        let scripts = thai_scripts(&t);
+        assert!(!scripts.is_empty() && scripts.iter().all(|s| *s == bold_italic), "bold italic Thai is drawn in TH Sarabun PSK Bold Italic");
+    }
+}
