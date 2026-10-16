@@ -35,6 +35,29 @@ pub fn paint(ui: &egui::Ui, rect: Rect, name: &str, size: f32, tint: Color32) {
 
 /// Square icon button: transparent until hovered; `selected` gets the accent treatment.
 pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
+    let resp = bare_button(ui, name, box_size, selected, tooltip);
+    if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
+}
+
+/// [`button`] for a vertical tool rail: the tooltip opens to the right of the button, where the
+/// pointer (which sits on the button) doesn't cover it.
+pub fn rail_button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
+    let resp = bare_button(ui, name, box_size, selected, tooltip);
+    if tooltip.is_empty() { resp } else { rail_tip(resp, tooltip) }
+}
+
+/// A hover tooltip beside `resp`, vertically centred on it (a vertical tool rail's).
+pub fn rail_tip(resp: Response, text: &str) -> Response {
+    let mut tip = egui::Tooltip::for_enabled(&resp);
+    tip.popup = tip.popup.align(egui::RectAlign::RIGHT).gap(8.0);
+    tip.show(|ui| {
+        ui.set_max_width(ui.spacing().tooltip_width);
+        ui.add(egui::Label::new(text));
+    });
+    resp
+}
+
+fn bare_button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     // The shared button paints no fill of its own: the eased press wash below replaces it.
     let clear = |icon| ButtonVisuals { fill: Color32::TRANSPARENT, stroke: Stroke::NONE, icon };
@@ -71,8 +94,7 @@ pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tool
         let size = (box_size * 0.5).round() * (1.0 - 0.08 * press.down);
         paint(ui, rect.translate(press.offset()), name, size, tint);
     }
-    let resp = theme::hand(resp);
-    if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
+    theme::hand(resp)
 }
 
 #[cfg(test)]

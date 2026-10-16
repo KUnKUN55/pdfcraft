@@ -4246,3 +4246,23 @@ fn private_new_chinese_keyboard_input_preserves_font_layout_and_saved_pixels() {
     assert_eq!(std::fs::read(path).unwrap(), original);
     println!("verified Chinese keyboard insertion/deletion and save/reopen rendering on {pages} pages");
 }
+
+/// Thai edition: the quick bar's tooltips open beside the button, where the pointer resting on
+/// the button doesn't cover them (they used to open under it).
+#[test]
+fn quick_bar_tooltips_open_beside_the_button() {
+    let mut h = harness(1, |_| {});
+    let button = h.get_all_by_label_contains("(V)").next().expect("the Select button").rect();
+    h.hover_at(button.center());
+    // Past the tooltip delay.
+    for _ in 0..8 {
+        h.run_steps(1);
+    }
+    let tip = h
+        .query_all_by_label_contains("(V)")
+        .map(|n| n.rect())
+        .find(|r| *r != button)
+        .expect("the tooltip shows while the pointer rests on the button");
+    assert!(tip.left() >= button.right(), "the tooltip {tip:?} opens to the right of the button {button:?}");
+    assert!(!tip.contains(button.center()), "the pointer doesn't cover the tooltip");
+}
