@@ -269,6 +269,10 @@ pub(super) fn rewrite_styled_block(
     let mut styled_spans = Vec::new();
     let mut underlines = HashMap::new();
     let mut overrides = HashMap::new();
+    // Styled runs set in a craft-fonts or installed family (TH Sarabun, a font on this machine):
+    // a viewer has no such font, so their glyphs are drawn from the family's own face, as a whole
+    // paragraph set in it is, rather than named in a font dictionary nobody can show.
+    let mut own_faces: HashMap<usize, (crate::added::Family, bool, bool)> = HashMap::new();
     for (span, source) in block.edited_spans(draft) {
         let mut edges = vec![span.start, span.end];
         for r in &ranges {
@@ -297,6 +301,7 @@ pub(super) fn rewrite_styled_block(
                 };
                 let r = selected.unwrap_or(&default_range);
                 let mut line = lines.get(source).unwrap_or(first).clone();
+                let mut own_face = None;
                 if let Some((family, bold, italic)) =
                     r.family.or(style.family).or_else(|| style.bold.map(|b| (source_family(&line.base_font), b, line.italic)))
                 {
@@ -305,6 +310,9 @@ pub(super) fn rewrite_styled_block(
                     line.base_font = base.to_owned();
                     line.bold = bold;
                     line.italic = italic;
+                    if family.craft(bold, italic).is_some() {
+                        own_face = Some((family, bold, italic));
+                    }
                 }
                 if let Some(resource) = &r.resource {
                     line.font = resource.clone();
@@ -324,6 +332,9 @@ pub(super) fn rewrite_styled_block(
                 }
                 index = styled_lines.len();
                 styled_lines.push(line);
+                if let Some(face) = own_face {
+                    own_faces.insert(index, face);
+                }
                 if let Some(r) = selected {
                     overrides.insert(index, r);
                 }
@@ -338,7 +349,7 @@ pub(super) fn rewrite_styled_block(
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let mut fonts = res.get(b"Font").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
-    for line in lines.iter().filter(|line| line.font.starts_with("PCRange")) {
+    for (_, line) in lines.iter().enumerate().filter(|(i, line)| line.font.starts_with("PCRange") && !own_faces.contains_key(i)) {
         let mut f = Dict::new();
         f.set(b"Type".to_vec(), Object::name("Font"));
         f.set(b"Subtype".to_vec(), Object::name("Type1"));
@@ -394,6 +405,25 @@ pub(super) fn rewrite_styled_block(
                     return Err(EditError::Invalid(format!("the selected font resource {resource} cannot show U+{:04X}", u32::from(ch))));
                 }
                 resource.clone()
+            } else if let Some(&(family, bold, italic)) = own_faces.get(&index) {
+                let key = (format!("own:{}", family.base_font(bold, italic)), ch);
+                if let Some(name) = fallback_names.get(&key) {
+                    chars.push((ch, index, name.clone()));
+                    continue;
+                }
+                if fallback_names.len() >= MAX_TYPE3_GLYPHS {
+                    return Err(EditError::Invalid("the replacement has too many fallback glyphs".into()));
+                }
+                let drawn = type3_font(doc, &mut fonts, &s, family, bold, italic, "", MAX_TYPE3_GLYPHS)?;
+                let name =
+                    drawn.names.first().cloned().ok_or_else(|| EditError::Invalid(format!("the {} font can't show \"{s}\"", family.label())))?;
+                let dict = fonts
+                    .get(name.as_bytes())
+                    .and_then(|f| doc.resolve(f).as_dict().cloned())
+                    .ok_or_else(|| EditError::Invalid("the chosen font could not be loaded".into()))?;
+                metrics.insert(name.clone(), Metrics::from_dict(doc, &dict));
+                fallback_names.insert(key, name.clone());
+                name
             } else if metrics.get(&source.font).is_some_and(|m| source_encodes(m, &s)) {
                 source.font.clone()
             } else if let Some((name, _)) = metrics.iter().find(|(_, m)| {

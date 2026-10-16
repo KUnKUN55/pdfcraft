@@ -3146,6 +3146,47 @@ fn disjoint_style_ranges_preserve_unselected_runs_and_validate_utf8_atomically()
     assert_eq!(pdfcraft_cos::write_full(&doc, &SaveOptions::default()).unwrap(), before);
 }
 
+/// Thai edition: Latin text in a selected range set in TH Sarabun (or a font installed on this
+/// machine) draws from that face, as a whole paragraph set in it does. It used to be named in a
+/// Type 1 dictionary with no font program, which viewers drew in a standard font instead.
+#[test]
+fn a_range_in_a_craft_family_draws_from_its_face() {
+    if crate::added::Family::Sarabun.craft(false, false).is_none() {
+        return;
+    }
+    let mut doc = mixed_region_page();
+    let block = text::text_blocks(&doc, 0).unwrap()[1].clone();
+    let b = block.editor_text.find("bold").unwrap();
+    let style = BlockStyle {
+        ranges: vec![RangeStyle {
+            range: b..b + 4,
+            family: Some((Family::Sarabun, false, false)),
+            resource: None,
+            size: None,
+            color: None,
+            underline: None,
+            char_spacing: None,
+            scale: None,
+        }],
+        ..Default::default()
+    };
+    text::rewrite_block(&mut doc, 0, 1, Some(&block.editor_text), &style).unwrap();
+    doc = reopen(&doc);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let bold = lines.iter().find(|l| l.text == "bold").expect("the range keeps its text");
+    let page = pdfcraft_model::pages(&doc).into_iter().next().unwrap();
+    let resources = page.dict.get(b"Resources").and_then(|o| doc.dict(o)).unwrap();
+    let fonts = resources.get(b"Font").and_then(|o| doc.dict(o)).unwrap();
+    let font = fonts.get(bold.font.as_bytes()).and_then(|o| doc.dict(o)).expect("the range's font is on the page");
+    assert_eq!(font.get(b"Subtype").and_then(|o| o.as_name()), Some(&b"Type3"[..]), "drawn from the face, not a named Type 1 font");
+    // The other paragraphs keep their own fonts.
+    let original = mixed_region_page();
+    for word in ["About", "Italic footer"] {
+        let prior = text::text_lines(&original, 0).unwrap().into_iter().find(|l| l.text == word).unwrap();
+        assert_eq!(lines.iter().find(|l| l.text == word).map(|l| l.font.clone()), Some(prior.font), "{word}");
+    }
+}
+
 #[test]
 fn centered_mixed_size_title_keeps_three_rows_when_changed() {
     let mut doc = mixed_region_page();
