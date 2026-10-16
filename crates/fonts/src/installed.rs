@@ -105,7 +105,10 @@ pub fn installed_family_like(base_font: &str) -> Option<u16> {
     if want.is_empty() {
         return None;
     }
-    installed_families().iter().position(|f| f.base.first().is_some_and(|plain| plain.to_ascii_lowercase() == want)).and_then(|i| u16::try_from(i).ok())
+    installed_families()
+        .iter()
+        .position(|f| f.base.first().is_some_and(|plain| plain.to_ascii_lowercase() == want))
+        .and_then(|i| u16::try_from(i).ok())
 }
 
 /// The face of installed family `family` in a style, read from disk the first time. A missing
@@ -143,7 +146,8 @@ fn load(path: &Path, index: u32, family: &'static str, style: &'static str) -> O
     let bytes: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
     let font = FontRef::from_index(bytes, index).ok()?;
     let data = ShaperData::new(&font);
-    let face: &'static LoadedFace = Box::leak(Box::new(LoadedFace { face: (font, data), info: CraftFont { family, style, scripts: &[], bytes }, index }));
+    let face: &'static LoadedFace =
+        Box::leak(Box::new(LoadedFace { face: (font, data), info: CraftFont { family, style, scripts: &[], bytes }, index }));
     let mut all = LOADED.write().ok()?;
     let id = u16::try_from(CRAFT_FONTS.len().checked_add(all.len())?).ok()?;
     all.push(face);
@@ -352,7 +356,16 @@ fn name_string(names: &[u8], id: u16) -> Option<String> {
             (3, 1 | 10) | (0, _) => {
                 let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
                 let Ok(text) = String::from_utf16(&units) else { continue };
-                (if platform == 3 && language == 0x0409 { 3 } else if platform == 3 { 2 } else { 1 }, text)
+                (
+                    if platform == 3 && language == 0x0409 {
+                        3
+                    } else if platform == 3 {
+                        2
+                    } else {
+                        1
+                    },
+                    text,
+                )
             }
             (1, 0) if raw.is_ascii() => (0, String::from_utf8_lossy(raw).into_owned()),
             _ => continue,

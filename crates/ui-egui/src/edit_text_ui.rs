@@ -326,6 +326,12 @@ pub struct ImageSelection {
     drag: Option<(Pos2, Option<Pos2>)>,
 }
 
+impl ImageSelection {
+    pub(crate) fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+}
+
 /// Once a selected corner is grabbed, text under it cannot take over the gesture. The same
 /// applies after the pointer leaves the image/page while dragging.
 pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, info: &DocInfo, view: &DocView) -> bool {
@@ -559,20 +565,6 @@ pub(crate) fn image_input(
         {
             view.image_selection = None;
             view.pending_edit = Some(Edit::EditPageImage { page, index: i, change: pdfcraft_engine::ImageEdit::Delete });
-            return true;
-        }
-        // The arrow keys move it as they move a paragraph: one point a press, ten with Shift.
-        if allow_interaction
-            && view.pending_edit.is_none()
-            && !ui.ctx().egui_wants_keyboard_input()
-            && let Some([dx, dy]) = crate::content_ui::nudge(ui.ctx())
-        {
-            let raw = images.get(i).map_or(b, |im| xf.user_rect(info, page, im.rect.map(|v| v as f32)));
-            // Screen pixels per point; the nudge is in points with y up the page, the screen's y down.
-            let across = if xf.rot % 180 == 0 { xf.pw } else { xf.ph };
-            let scale = xf.rect.width() / across.max(1e-3);
-            let target = raw.translate(egui::vec2(dx as f32, -dy as f32) * scale);
-            view.pending_edit = Some(Edit::EditPageImage { page, index: i, change: pdfcraft_engine::ImageEdit::Move(user_box(xf, info, page, target)) });
             return true;
         }
     }

@@ -2577,3 +2577,24 @@ certificate	SHA-256 digest	ไดเจสต์ SHA-256
 @plural	{n} field name collides with earlier files and will be renamed: {list}|{n} field names collide with earlier files and will be renamed: {list}	ชื่อช่อง {n} รายการซ้ำกับไฟล์ก่อนหน้าและจะถูกเปลี่ยนชื่อ: {list}
 @plural	{n} object selected|{n} objects selected	เลือกไว้ {n} ออบเจ็กต์
 @plural	Downloaded {n} PDF|Downloaded {n} PDFs	ดาวน์โหลด PDF แล้ว {n} ไฟล์
+	Next tab	แท็บถัดไป
+	Previous tab	แท็บก่อนหน้า
+	Remove "{name}" from this list? The file itself is not deleted.	เอา "{name}" ออกจากรายการนี้หรือไม่? ไฟล์จะไม่ถูกลบ
+key	Ctrl	Ctrl
+key	Shift	Shift
+key	Delete	Delete
+key	Esc	Esc
+key	Home	Home
+key	End	End
+key	Space	Space
+	Minimize	ย่อหน้าต่าง
+	Maximize	ขยายเต็มจอ
+	Restore	คืนขนาด
+	Use system title bar	ใช้แถบชื่อเรื่องของระบบ
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	แสดงแถบชื่อเรื่องแบบพื้นฐานสำหรับปุ่มหน้าต่างแทนแถบแท็บ GNOME ไม่วาดแถบชื่อเรื่องให้แอป แถบนี้จึงไม่ใช้ธีมของ GNOME
+	Allow	อนุญาต
+	Only allow this if you trust the source document.	อนุญาตเฉพาะเมื่อคุณเชื่อถือเอกสารต้นทางเท่านั้น
+	Open this local PDF?	เปิด PDF ในเครื่องนี้หรือไม่?
+	This document is trying to open a local file:	เอกสารนี้พยายามเปิดไฟล์ในเครื่อง:
+	Move tag earlier	ย้ายแท็กขึ้นก่อน
+	Move tag later	ย้ายแท็กลงทีหลัง

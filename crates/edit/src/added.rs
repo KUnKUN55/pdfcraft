@@ -11,9 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
-use pdfcraft_fonts::{
-    GlyphError, GlyphOutline, ShapedCluster, ShapedScript, helvetica_width, literal, shape_arabic, shape_thai, shaped_glyph, win_ansi,
-};
+use pdfcraft_fonts::{GlyphError, GlyphOutline, ShapedCluster, ShapedScript, Std14, literal, shape_arabic, shape_thai, shaped_glyph, win_ansi};
 use unicode_bidi::{Level, ParagraphBidiInfo};
 
 use crate::{EditError, MarkKind, check, contents, n, page_list, place_tagged};
@@ -155,22 +153,39 @@ impl Family {
         (family, s.contains("Bold"), s.contains("Italic") || s.contains("Oblique"))
     }
 
-    /// Approximate advance width of `s` (standard-14 metrics are not bundled: Helvetica widths,
-    /// scaled for Times; Courier is monospaced).
-    pub fn width(self, s: &str, size: f64, bold: bool) -> f64 {
-        let w = match self {
-            Family::Courier => s.chars().count() as f64 * 0.6 * size,
-            Family::Times => helvetica_width(s, size) * 0.9,
-            Family::Helvetica => helvetica_width(s, size),
-            // The face's own advances; Helvetica's estimate for what it can't shape.
-            Family::Sarabun | Family::Installed(_) => {
-                return self
-                    .craft(bold, false)
-                    .and_then(|face| pdfcraft_fonts::shape_face(s, face, s.chars().any(is_thai)).ok())
-                    .map_or_else(|| helvetica_width(s, size), |clusters| clusters.iter().map(|c| c.advance).sum::<f64>() * size);
-            }
-        };
-        if bold { w * 1.05 } else { w }
+    /// Advance width of `s` at `size` points, from the published standard-14 metrics.
+    ///
+    /// `italic` matters: the item is written out as the oblique/italic face (see [`Family::base_font`]),
+    /// whose published widths differ from the upright face (Times-Italic `A` is 611, Times-Roman 722).
+    pub fn width(self, s: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        match self {
+            // The face's own advances; the standard family's metrics for what it can't shape.
+            Family::Sarabun | Family::Installed(_) => self
+                .craft(bold, false)
+                .and_then(|face| pdfcraft_fonts::shape_face(s, face, s.chars().any(is_thai)).ok())
+                .map_or_else(|| self.std14(bold, italic).text_width(s, size), |clusters| clusters.iter().map(|c| c.advance).sum::<f64>() * size),
+            _ => self.std14(bold, italic).text_width(s, size),
+        }
+    }
+
+    /// The standard-14 face this family means at the given style (the standard family's face for
+    /// a craft-fonts or installed family).
+    pub fn std14(self, bold: bool, italic: bool) -> Std14 {
+        match (self.standard(), bold, italic) {
+            (Family::Sarabun | Family::Installed(_), ..) => Std14::Helvetica,
+            (Family::Courier, false, false) => Std14::Courier,
+            (Family::Courier, true, false) => Std14::CourierBold,
+            (Family::Courier, false, true) => Std14::CourierOblique,
+            (Family::Courier, true, true) => Std14::CourierBoldOblique,
+            (Family::Times, false, false) => Std14::TimesRoman,
+            (Family::Times, true, false) => Std14::TimesBold,
+            (Family::Times, false, true) => Std14::TimesItalic,
+            (Family::Times, true, true) => Std14::TimesBoldItalic,
+            (Family::Helvetica, false, false) => Std14::Helvetica,
+            (Family::Helvetica, true, false) => Std14::HelveticaBold,
+            (Family::Helvetica, false, true) => Std14::HelveticaOblique,
+            (Family::Helvetica, true, true) => Std14::HelveticaBoldOblique,
+        }
     }
 }
 
@@ -181,7 +196,7 @@ fn craft_face(t: &AddedText) -> Option<ShapedScript> {
 
 /// The width of `s` in the standard font that draws an item's unshaped text.
 fn latin_width(t: &AddedText, s: &str) -> f64 {
-    t.family.standard().width(s, t.size, t.bold)
+    t.family.standard().width(s, t.size, t.bold, t.italic)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -347,7 +362,7 @@ fn wrapped(t: &AddedText) -> Vec<(String, bool)> {
         // of an em apart.
         // A craft-fonts family is shaped too: its widths are its face's.
         let shaped = arabic || thai || craft_face(t).is_some();
-        let measure = |s: &str| if shaped { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold) };
+        let measure = |s: &str| if shaped { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold, t.italic) };
         let space = measure(" ");
         let (mut line, mut line_w) = (String::new(), 0.0);
         for word in para.split(' ') {
@@ -591,7 +606,7 @@ fn natural_width(t: &AddedText) -> f64 {
         .split('\n')
         .map(|para| {
             let rtl = para.chars().any(is_arabic) && unicode_bidi::get_base_direction(para) == unicode_bidi::Direction::Rtl;
-            if shaped { shaped_width(t, para, rtl) } else { t.family.width(para, t.size, t.bold) }
+            if shaped { shaped_width(t, para, rtl) } else { t.family.width(para, t.size, t.bold, t.italic) }
         })
         .fold(0.0, f64::max)
 }
@@ -899,7 +914,7 @@ fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing:
             let [cr, cg, cb] = t.color.map(|v| v.clamp(0.0, 1.0));
             out.extend(format!("BT /{name} {} Tf {} {} {} rg\n", n(t.size), n(cr), n(cg), n(cb)).bytes());
             for (i, line) in lines(t).iter().enumerate() {
-                let w = t.family.width(line, t.size, t.bold);
+                let w = t.family.width(line, t.size, t.bold, t.italic);
                 let x = match t.align {
                     Align::Left | Align::Justify => r[0],
                     Align::Center => r[0] + ((r[2] - r[0]) - w) / 2.0,
