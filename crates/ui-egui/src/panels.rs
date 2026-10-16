@@ -233,6 +233,23 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
                 if theme::hand(resp).tip(format!("{} — {}", tl!(item.label), item.command)).clicked() {
                     run = Some(item.command);
                 }
+                // Header and footer, watermark and background: Update and Remove under the item
+                // while the document has one (Acrobat's submenu).
+                if let Some((kind, update, remove)) = mark_actions(item.command)
+                    && app.active_ids().and_then(|(_, id)| app.session.get(id)).is_some_and(|d| d.allows_modification() && d.marks.contains(&kind))
+                {
+                    for (label, command) in [update, remove] {
+                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(label)));
+                        let press = theme::Press::track(ui, &resp);
+                        press.wash(ui, rect, 6, false);
+                        let body = rect.translate(press.offset());
+                        row_label(ui, tl!(label), theme::regular(12.0), t.text_muted, body.left_center() + vec2(34.0, 0.0), body.width() - 42.0);
+                        if theme::hand(resp).clicked() {
+                            run = Some(command);
+                        }
+                    }
+                }
             }
         }
         if g.id == "fill_sign" {
@@ -268,6 +285,22 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
     if let Some(cmd) = run {
         app.run_command(cmd);
     }
+}
+
+/// A row's label and the command it runs.
+type Action = (&'static str, &'static str);
+
+/// The kind of page mark a tool item adds, with its Update and Remove commands.
+fn mark_actions(command: &str) -> Option<(pdfcraft_engine::MarkKind, Action, Action)> {
+    use pdfcraft_engine::MarkKind as K;
+    Some(match command {
+        "edit.header_footer" => {
+            (K::HeaderFooter, ("Update header & footer…", "edit.header_footer.update"), ("Remove header & footer", "edit.header_footer.remove"))
+        }
+        "edit.watermark" => (K::Watermark, ("Update watermark…", "edit.watermark.update"), ("Remove watermark", "edit.watermark.remove")),
+        "edit.background" => (K::Background, ("Update background…", "edit.background.update"), ("Remove background", "edit.background.remove")),
+        _ => return None,
+    })
 }
 
 /// Add a stamp: Dynamic, Sign Here and Standard Business stamps; click one, then click on the

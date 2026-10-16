@@ -970,6 +970,17 @@ fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing:
     Ok((out, res))
 }
 
+/// A text item's content in display space, without an item of its own (headers and footers draw
+/// their text this way), and the `/Font` resources it needs. `taken` holds the page's font names.
+pub(crate) fn text_ops(doc: &mut Document, t: &AddedText, taken: &Dict) -> Result<(Vec<u8>, Dict), EditError> {
+    draw(doc, &Content::Text(t.clone()), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], taken, false)
+}
+
+/// The width of one line of `t` as it is drawn.
+pub(crate) fn line_width(t: &AddedText, line: &str) -> f64 {
+    natural_width(&AddedText { text: line.to_owned(), ..t.clone() })
+}
+
 fn params(c: &Content) -> Dict {
     let mut d = Dict::new();
     let arr = |v: &[f64]| Object::Array(v.iter().map(|x| Object::Real(*x)).collect());

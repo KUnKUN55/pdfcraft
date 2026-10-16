@@ -1133,6 +1133,22 @@ impl Automation {
                 if let Some(s) = a.opt_int("start_number")? {
                     hf.start_number = s.clamp(1, u32::MAX as i64) as u32;
                 }
+                if let Some(f) = a.opt_str("font")? {
+                    hf.family = match f.to_ascii_lowercase().as_str() {
+                        "helvetica" => pdfcraft_engine::FontFamily::Helvetica,
+                        "times" => pdfcraft_engine::FontFamily::Times,
+                        "courier" => pdfcraft_engine::FontFamily::Courier,
+                        "sarabun" => pdfcraft_engine::FontFamily::Sarabun,
+                        _ => pdfcraft_engine::FontFamily::from_name(f).ok_or_else(|| {
+                            ToolError::InvalidArgs(format!(
+                                "unknown font {f:?} (helvetica, times, courier, sarabun, or an installed font's family name)"
+                            ))
+                        })?,
+                    };
+                }
+                hf.underline = a.opt_bool("underline")?.unwrap_or(false);
+                hf.bold = a.opt_bool("bold")?.unwrap_or(false);
+                hf.italic = a.opt_bool("italic")?.unwrap_or(false);
                 Edit::AddHeaderFooter { pages, settings: hf, replace }
             }
             "doc_watermark" => {

@@ -161,12 +161,18 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     match kind {
         MarkKind::HeaderFooter => {
             ui.horizontal(|ui| {
-                ui.label(tl!("Font: Helvetica"));
+                ui.label(tl!("Font:"));
+                crate::content_ui::family_menu(ui, &mut d.hf.family);
+                ui.add(widgets::checkbox(&mut d.hf.bold, tl!("Bold")));
+                ui.add(widgets::checkbox(&mut d.hf.italic, tl!("Italic")));
+                ui.add_space(8.0);
                 ui.label(tl!("Size"));
                 ui.add(egui::DragValue::new(&mut d.hf.font_size).range(4.0..=72.0).speed(0.5));
                 ui.add(widgets::checkbox(&mut d.hf.underline, tl!("Underline")));
                 color_button(ui, &mut d.hf.color);
-                ui.add_space(16.0);
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
                 ui.label(format!("{} ({})", tl!("Margins"), units.label()));
                 let per = units.per_point();
                 for (label, k) in [(tl!("Top"), 0), (tl!("Bottom"), 1), (tl!("Left"), 2), (tl!("Right"), 3)] {

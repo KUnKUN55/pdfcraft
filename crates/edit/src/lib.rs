@@ -64,12 +64,51 @@ pub struct HeaderFooter {
     pub margins: [f64; 4],
     /// The number `<<1>>` shows on the first page of the range.
     pub start_number: u32,
+    /// The font: a standard family, TH Sarabun PSK or an installed family, as Add text offers.
+    pub family: Family,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 impl Default for HeaderFooter {
     /// Acrobat's defaults: 8 pt black, margins 0.5 in top and bottom, 1 in left and right.
     fn default() -> Self {
-        Self { text: Default::default(), font_size: 8.0, color: [0.0; 3], underline: false, margins: [36.0, 36.0, 72.0, 72.0], start_number: 1 }
+        Self {
+            text: Default::default(),
+            font_size: 8.0,
+            color: [0.0; 3],
+            underline: false,
+            margins: [36.0, 36.0, 72.0, 72.0],
+            start_number: 1,
+            family: Family::Helvetica,
+            bold: false,
+            italic: false,
+        }
+    }
+}
+
+impl HeaderFooter {
+    /// Whether the text is drawn in plain Helvetica (`/PCHelv`), as before fonts could be chosen.
+    fn plain(&self) -> bool {
+        self.family == Family::Helvetica && !self.bold && !self.italic
+    }
+
+    /// The text of slot `slot` (0–5) as an Add-text item in this font, its box spanning the
+    /// margins of a page `w` wide and its top at `top` (display space).
+    fn item(&self, text: &str, slot: usize, w: f64, top: f64) -> AddedText {
+        let [_, _, left, right] = self.margins;
+        // Margins wider than the page: the whole width, rather than an empty box.
+        let (x0, x1) = if w - right - left > self.font_size { (left, w - right) } else { (0.0, w) };
+        AddedText {
+            rect: [x0, top - self.font_size, x1, top],
+            text: text.to_owned(),
+            family: self.family,
+            bold: self.bold,
+            italic: self.italic,
+            size: self.font_size,
+            color: self.color,
+            align: [Align::Left, Align::Center, Align::Right][slot % 3],
+        }
     }
 }
 
@@ -431,6 +470,28 @@ pub fn add_page_fonts(doc: &mut Document, page: usize, fonts: &[(String, ObjRef)
     Ok(())
 }
 
+/// The `/Font` resources page `page` has now.
+fn page_fonts(doc: &Document, page: &pdfcraft_model::Page) -> Dict {
+    let res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default()
+}
+
+/// [`add_page_fonts`] for fonts given as objects (a font dictionary or a reference).
+fn add_page_font_objects(doc: &mut Document, page: usize, fonts: Vec<(Vec<u8>, Object)>) -> Result<(), EditError> {
+    if fonts.is_empty() {
+        return Ok(());
+    }
+    let p = page_list(doc).into_iter().nth(page).ok_or(EditError::NoSuchPage(page))?;
+    let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    let mut dict = page_fonts(doc, &p);
+    for (name, font) in fonts {
+        dict.set(name, font);
+    }
+    res.set(b"Font".to_vec(), Object::Dict(dict));
+    doc.update_dict(p.obj, |d| d.set(b"Resources".to_vec(), Object::Dict(res)))?;
+    Ok(())
+}
+
 /// The width of a line of page text in `/PCHelv`, its Thai shaped (Thai edition).
 fn page_text_width(line: &str, size: f64) -> f64 {
     pdfcraft_fonts::thai_text::line_width(line, size, false, false, &helvetica_width)
@@ -463,7 +524,12 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
     }
     // Tokens only add ASCII (Bates prefixes and suffixes are part of the template), so checking
     // the templates, split as `expand`'s output is, covers every page.
-    hf.text.iter().try_for_each(|t| drawable(t.lines()))?;
+    if hf.plain() {
+        hf.text.iter().try_for_each(|t| drawable(t.lines()))?;
+    } else if let Some(c) = hf.text.iter().enumerate().find_map(|(slot, t)| added::first_undrawable(&hf.item(t, slot, 1000.0, 1000.0))) {
+        // A chosen font draws what its face has; the rest as its standard family, like Add text.
+        return Err(undrawable(c));
+    }
     if !(hf.font_size.is_finite() && hf.font_size > 0.0 && hf.font_size <= 200.0 && hf.margins.iter().all(|m| m.is_finite() && *m >= 0.0)) {
         return Err(EditError::Invalid("invalid font size or margins".into()));
     }
@@ -495,6 +561,60 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let bates = bates0 + k as u64;
         let size = hf.font_size;
         let [top, bottom, left, right] = hf.margins;
+        if !hf.plain() {
+            let view = page.view_matrix(doc);
+            let mut content = begin(MarkKind::HeaderFooter, "Header", view).into_bytes();
+            let mut fonts = Dict::new();
+            let mut underlines = String::new();
+            for (slot, template) in hf.text.iter().enumerate() {
+                if template.trim().is_empty() {
+                    continue;
+                }
+                let text = expand(template, number, count, bates, cx);
+                // Headers hang below the top margin; footers' last line sits on the bottom margin.
+                let header_top = h - top + size * 0.15;
+                let mut t = hf.item(&text, slot, w, header_top);
+                if slot >= 3 {
+                    let n_lines = added::lines(&t).len().max(1) as f64;
+                    t = hf.item(&text, slot, w, bottom + (n_lines - 1.0) * size * 1.2 + size * 0.95);
+                }
+                // Font names already on the page or used by this mark: new ones never clash.
+                let mut taken = page_fonts(doc, page);
+                for (k, v) in fonts.iter() {
+                    taken.set(k.clone(), v.clone());
+                }
+                let (ops, res) = added::text_ops(doc, &t, &taken)?;
+                content.extend(ops);
+                if let Some(Object::Dict(f)) = res.get(b"Font") {
+                    for (k, v) in f.iter() {
+                        fonts.set(k.clone(), v.clone());
+                    }
+                }
+                if hf.underline {
+                    let r = added::text_rect(&t);
+                    for (li, line) in added::lines(&t).iter().enumerate() {
+                        let tw = added::line_width(&t, line);
+                        let x = match slot % 3 {
+                            0 => r[0],
+                            1 => r[0] + (r[2] - r[0] - tw) / 2.0,
+                            _ => r[2] - tw,
+                        };
+                        let y = r[3] - (li as f64 * 1.2 + 0.95) * size;
+                        underlines.push_str(&format!("{} {} {} {} re f\n", n(x), n(y - size * 0.15), n(tw), n((size * 0.06).max(0.4))));
+                    }
+                }
+            }
+            if !underlines.is_empty() {
+                content.extend(format!("{}\n{underlines}", rgb(hf.color)).bytes());
+            }
+            content.extend_from_slice(END.as_bytes());
+            add_resources(doc, page, None, None)?;
+            let named: Vec<(Vec<u8>, Object)> = fonts.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            add_page_font_objects(doc, i, named)?;
+            let page = &page_list(doc)[i];
+            place(doc, page, MarkKind::HeaderFooter, content, false)?;
+            continue;
+        }
         let mut body: Vec<u8> = format!("BT\n/PCHelv {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
         let mut underlines = String::new();
         let mut placed = Vec::new();

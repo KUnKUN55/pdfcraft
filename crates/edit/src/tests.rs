@@ -97,6 +97,43 @@ fn header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content() 
 }
 
 #[test]
+fn header_and_footer_take_the_chosen_font_and_can_be_removed() {
+    let mut doc = fixture();
+    let hf = HeaderFooter {
+        text: ["Left".into(), String::new(), String::new(), String::new(), "<<1>>".into(), "Right".into()],
+        family: Family::Times,
+        bold: true,
+        ..HeaderFooter::default()
+    };
+    add_header_footer(&mut doc, &[0, 2], &hf, false, &cx()).unwrap();
+    let doc2 = reopen(&doc);
+    let mark = streams(&doc2, 0).pop().unwrap();
+    assert!(mark.contains("/PCMark /HeaderFooter") && mark.contains("/PCFTimesBold 8 Tf") && mark.contains("(Left) Tj"), "{mark}");
+    assert!(mark.contains("(1) Tj") && mark.contains("(Right) Tj") && !mark.contains("/PCHelv"), "{mark}");
+    let p0 = &pdfcraft_model::pages(&doc2)[0];
+    let res = doc2.resolve(p0.dict.get(b"Resources").unwrap());
+    let fonts = doc2.resolve(res.as_dict().unwrap().get(b"Font").unwrap());
+    let times = doc2.resolve(fonts.as_dict().unwrap().get(b"PCFTimesBold").unwrap());
+    assert_eq!(times.as_dict().unwrap().name(b"BaseFont"), Some(&b"Times-Bold"[..]));
+    // Right-aligned text ends at the right margin, as in Helvetica.
+    let footer_x = |s: &str| -> f64 {
+        let at = s.find("(Right) Tj").unwrap();
+        let tm = s[..at].rfind(" Tm").unwrap();
+        let nums: Vec<f64> = s[..tm].split_whitespace().rev().take(2).filter_map(|v| v.parse().ok()).collect();
+        nums[1]
+    };
+    let (w, _) = p0.display_size(&doc2);
+    let right_edge = footer_x(&mark) + Family::Times.width("Right", 8.0, true, false);
+    assert!((right_edge - (w - 72.0)).abs() < 0.5, "{right_edge} vs {}", w - 72.0);
+    assert_eq!(marks_present(&doc), [MarkKind::HeaderFooter]);
+    assert_eq!(remove_marks(&mut doc, &[0, 1, 2], MarkKind::HeaderFooter).unwrap(), 2);
+    assert!(marks_present(&doc).is_empty());
+    // A font's own face is checked like Add text: what neither it nor its standard family draws is refused.
+    let greek = HeaderFooter { text: ["Ελλάδα".into(), String::new(), String::new(), String::new(), String::new(), String::new()], ..hf };
+    assert!(add_header_footer(&mut doc, &[0], &greek, false, &cx()).unwrap_err().to_string().contains("U+0395"));
+}
+
+#[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page
     // number after it. The old code wrapped the second page to zero; now the whole run is

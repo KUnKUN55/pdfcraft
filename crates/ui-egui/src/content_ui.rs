@@ -634,7 +634,7 @@ pub(crate) fn restyled(old: &AddedText, new: AddedText, page_width: Option<f64>)
 
 /// The Add text font menu: the bundled families, then the fonts installed on this machine, with
 /// a box to search them by name.
-fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
+pub(crate) fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
     let search_id = ui.make_persistent_id("font-family-search");
     egui::ComboBox::from_id_salt("font-family")
         .selected_text(family.label())
