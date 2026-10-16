@@ -371,6 +371,19 @@ pub struct PageClip {
     pub pages: Vec<usize>,
 }
 
+/// A copied text box (an added one, or a paragraph of the page as one): what ⌘V adds again.
+#[derive(Clone, Debug)]
+pub struct TextClip {
+    /// The box, in display space of the page it was copied from.
+    pub text: pdfcraft_engine::AddedText,
+    pub page: usize,
+    /// How many times it was pasted: each paste lands a step further down and right.
+    pub pastes: u32,
+}
+
+/// How far each paste of a copied text box is offset from the last, in points.
+pub(crate) const PASTE_STEP: f64 = 12.0;
+
 /// Files delivered asynchronously: (name, bytes).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -697,6 +710,9 @@ pub struct PdfCraftApp {
     pub progress_notice: Option<widgets::ProgressNotice>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
+    /// A text box or paragraph copied with ⌘C in Edit a PDF, ready to paste as a new text box
+    /// (Thai edition).
+    pub text_clipboard: Option<TextClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
     grid_drop: Option<GridDrop>,
     /// The last snapshot (width, height, RGBA); `system_clipboard` also puts it on the
@@ -994,6 +1010,7 @@ impl PdfCraftApp {
             optimize_run: None,
             progress_notice: None,
             page_clipboard: None,
+            text_clipboard: None,
             grid_drop: None,
             last_snapshot: None,
             last_copied_image: None,
@@ -2701,16 +2718,106 @@ impl PdfCraftApp {
         false
     }
 
-    /// ⌘C copies the selected text, unless a text field has the keyboard (it copies its own).
+    /// ⌘C copies the selected text, unless a text field has the keyboard (it copies its own). In
+    /// Edit a PDF it copies the selected text box or paragraph, which ⌘V then adds again as a new
+    /// text box (Thai edition).
     fn copy_key(&mut self, i: usize, ctx: &egui::Context) {
-        // ⌘C arrives as a Copy event on most platforms.
-        let copy = ctx.input(|input| input.events.iter().any(|e| matches!(e, egui::Event::Copy)));
-        if !copy || ctx.egui_wants_keyboard_input() {
+        // ⌘C and ⌘V arrive as Copy and Paste events on most platforms.
+        let (copy, paste) = ctx.input(|input| {
+            let copy = input.events.iter().any(|e| matches!(e, egui::Event::Copy));
+            let paste = input.events.iter().find_map(|e| match e {
+                egui::Event::Paste(text) => Some(text.clone()),
+                _ => None,
+            });
+            (copy, paste)
+        });
+        if ctx.egui_wants_keyboard_input() {
             return;
         }
-        let Some((id, text)) = self.views.get(i).and_then(|v| Some((v.id, v.selected_text()?))) else { return };
+        if let Some(text) = paste {
+            self.paste_text_box(i, &text);
+        }
+        if !copy {
+            return;
+        }
+        let Some(id) = self.views.get(i).map(|v| v.id) else { return };
+        if let Some(clip) = self.text_box_to_copy(i) {
+            if self.may_copy(id) {
+                ctx.copy_text(clip.text.text.clone());
+                self.text_clipboard = Some(clip);
+            }
+            return;
+        }
+        let Some(text) = self.views.get(i).and_then(DocView::selected_text) else { return };
         if self.may_copy(id) {
             ctx.copy_text(text);
+        }
+    }
+
+    /// Whether Edit a PDF's text boxes are on screen to copy and paste (Add text, Edit text, or
+    /// the Edit panel open).
+    fn editing_content(&self) -> bool {
+        matches!(self.quick_tool, QuickTool::AddText | QuickTool::EditText) || (self.left_open && self.left == LeftPanel::Tool("edit"))
+    }
+
+    /// The selected added text box, or the paragraph selected in Edit text, as a box to paste.
+    fn text_box_to_copy(&self, i: usize) -> Option<TextClip> {
+        if !self.editing_content() {
+            return None;
+        }
+        let view = self.views.get(i)?;
+        let doc = self.session.get(view.id)?;
+        if view.content.draft.is_some() {
+            return None;
+        }
+        let added = |page: usize, index: usize| match &doc.added.iter().filter(|a| a.page == page).nth(index)?.content {
+            pdfcraft_engine::AddedContent::Text(t) => Some(TextClip { text: t.clone(), page, pastes: 0 }),
+            pdfcraft_engine::AddedContent::Image(_) => None,
+        };
+        if let Some((page, index)) = view.content.selected {
+            return added(page, index);
+        }
+        if self.quick_tool != QuickTool::EditText || view.line_editor.is_some() {
+            return None;
+        }
+        let (page, target) = view.objects.single_selected()?;
+        match target.kind {
+            pdfcraft_engine::ObjectKind::Added => added(page, target.index),
+            pdfcraft_engine::ObjectKind::Text => {
+                let block = doc.text_blocks(page).get(target.index)?.clone();
+                let xf = view.page_xform(page)?;
+                let text = edit_text_ui::paragraph_as_added(&xf, &doc.info, page, &block)?;
+                Some(TextClip { text, page, pastes: 0 })
+            }
+            _ => None,
+        }
+    }
+
+    /// ⌘V in Edit a PDF: the copied text box again, as a new text box on the current page, a
+    /// step down and right of the last one, and selected. Only while the clipboard still holds
+    /// its text (something copied elsewhere since is not pasted as a box).
+    fn paste_text_box(&mut self, i: usize, pasted: &str) {
+        if !self.editing_content() {
+            return;
+        }
+        let Some(clip) = self.text_clipboard.as_mut().filter(|c| c.text.text.trim() == pasted.trim()) else { return };
+        let Some(view) = self.views.get(i) else { return };
+        if view.content.draft.is_some() || view.line_editor.is_some() {
+            return;
+        }
+        let page = view.current;
+        let Some(doc) = self.session.get(view.id) else { return };
+        let Some(page_width) = doc.info.pages.get(page).map(|p| f64::from(p.width)) else { return };
+        // On its own page the first paste is offset; on another page it lands where it was.
+        let steps = if page == clip.page { clip.pastes.saturating_add(1) } else { clip.pastes };
+        let shift = PASTE_STEP * f64::from(steps.min(40));
+        let r = clip.text.rect;
+        let text = pdfcraft_engine::AddedText { rect: [r[0] + shift, r[1] - shift, r[2] + shift, r[3] - shift], ..clip.text.clone() };
+        let text = pdfcraft_engine::fitted_text(&text, page_width);
+        let before = doc.added.iter().filter(|a| a.page == page).count();
+        clip.pastes = clip.pastes.saturating_add(1);
+        if self.apply_edit(pdfcraft_engine::Edit::AddText { page, text }) {
+            self.views[i].content.select_added = Some((page, before));
         }
     }
 

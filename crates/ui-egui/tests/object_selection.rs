@@ -397,3 +397,91 @@ fn modifier_selection_picks_foreground_text_and_added_items_over_background_artw
         assert!(new.rect.iter().enumerate().all(|(i, value)| (value - old.rect[i] - shift[i % 2]).abs() < 0.01), "{old:?} -> {new:?}");
     }
 }
+
+fn added_texts(h: &Harness<'static, PdfCraftApp>) -> Vec<(String, [f64; 4])> {
+    let app = h.state();
+    app.session
+        .get(app.views[0].id)
+        .unwrap()
+        .added
+        .iter()
+        .filter_map(|a| match &a.content {
+            pdfcraft_engine::AddedContent::Text(t) => Some((t.text.clone(), t.rect)),
+            pdfcraft_engine::AddedContent::Image(_) => None,
+        })
+        .collect()
+}
+
+/// A press at `from`, a move to `to` and the release there, with `mods` held throughout.
+fn drag_with(h: &mut Harness<'static, PdfCraftApp>, from: Pos2, to: Pos2, mods: Modifiers) {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: mods };
+    h.hover_at(from);
+    h.run_steps(2);
+    h.event_modifiers(button(from, true), mods);
+    h.run_steps(1);
+    for k in 1..=4 {
+        let p = from + (to - from) * (k as f32 / 4.0);
+        h.event_modifiers(egui::Event::PointerMoved(p), mods);
+        h.run_steps(1);
+    }
+    h.event_modifiers(button(to, false), mods);
+    h.run_steps(4);
+}
+
+/// Thai edition: a paragraph of the page selected in Edit text is copied with ⌘C and pasted
+/// with ⌘V as a new text box with its text; the paragraph itself is untouched.
+#[test]
+fn a_selected_paragraph_copies_and_pastes_as_a_text_box() {
+    let mut h = harness();
+    let before = objects(&h);
+    let p = at(&h, 55.0, 70.0);
+    click(&mut h, p, Modifiers::NONE);
+    let text =
+        before.iter().find(|o| o.target.kind == pdfcraft_engine::ObjectKind::Text && screen_contains(&h, o, p)).and_then(|o| o.text.clone()).unwrap();
+    let notes = added_texts(&h).len();
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    h.event(egui::Event::Paste(text.clone()));
+    h.run_steps(4);
+    let after = added_texts(&h);
+    assert_eq!(after.len(), notes + 1, "a new text box");
+    assert_eq!(after.last().map(|t| t.0.as_str()), Some(text.as_str()), "with the paragraph's text");
+    let texts = |o: &[EditableObject]| {
+        o.iter().filter(|o| o.target.kind == pdfcraft_engine::ObjectKind::Text).map(|o| (o.text.clone(), o.rect)).collect::<Vec<_>>()
+    };
+    assert_eq!(texts(&objects(&h)), texts(&before), "the page's paragraphs are untouched");
+}
+
+/// Thai edition: Ctrl+drag of a paragraph drops a copy as a new text box where it was released;
+/// Ctrl+click still only toggles it in the selection.
+#[test]
+fn ctrl_dragging_a_paragraph_drops_a_copy() {
+    let mut h = harness();
+    let before = objects(&h);
+    let p = at(&h, 55.0, 70.0);
+    let notes = added_texts(&h).len();
+    drag_with(&mut h, p, p + egui::vec2(0.0, 160.0), Modifiers::COMMAND);
+    let after = added_texts(&h);
+    assert_eq!(after.len(), notes + 1, "a copy");
+    let source = before.iter().find(|o| o.target.kind == pdfcraft_engine::ObjectKind::Text && screen_contains(&h, o, p)).unwrap();
+    let (text, r) = after.last().cloned().unwrap();
+    assert_eq!(Some(text), source.text.clone());
+    assert!(r[3] < source.rect[3] - 50.0, "dropped lower down: {:?} -> {r:?}", source.rect);
+    let texts = |o: &[EditableObject]| {
+        o.iter().filter(|o| o.target.kind == pdfcraft_engine::ObjectKind::Text).map(|o| (o.text.clone(), o.rect)).collect::<Vec<_>>()
+    };
+    assert_eq!(texts(&objects(&h)), texts(&before), "the paragraph stays where it was");
+}
+
+fn screen_contains(h: &Harness<'static, PdfCraftApp>, o: &EditableObject, p: Pos2) -> bool {
+    let app = h.state();
+    let doc = app.session.get(app.views[0].id).unwrap();
+    let Some(xf) = app.views[0].page_screen_rect(0) else { return false };
+    let ph = doc.info.pages[0].height;
+    let k = xf.width() / doc.info.pages[0].width;
+    let r = egui::Rect::from_min_max(
+        xf.min + egui::vec2(o.rect[0] as f32 * k, (ph - o.rect[3] as f32) * k),
+        xf.min + egui::vec2(o.rect[2] as f32 * k, (ph - o.rect[1] as f32) * k),
+    );
+    r.expand(2.0).contains(p)
+}

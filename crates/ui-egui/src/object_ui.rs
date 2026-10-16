@@ -32,11 +32,25 @@ struct Gesture {
     now: Pos2,
     marquee: bool,
     additive: bool,
+    /// Ctrl pressed on this text (Thai edition): released where it was, the press toggles it in
+    /// the selection as before; dragged, it drops a copy as a new text box. Its rect is in user space.
+    copy: Option<(ObjectTarget, [f64; 4])>,
 }
+
+/// How far a press must travel before it is a drag, not a click (screen points).
+const DRAG_SLOP: f32 = 3.0;
 
 impl ObjectSelection {
     pub fn count(&self) -> usize {
         self.selected.len()
+    }
+
+    /// The one selected object and its page, when exactly one is selected (Copy).
+    pub fn single_selected(&self) -> Option<(usize, ObjectTarget)> {
+        match self.selected.as_slice() {
+            [one] => Some((self.page?, one.target)),
+            _ => None,
+        }
     }
 
     /// A preview belongs to the active, focused document. Returning from another tab or a
@@ -117,6 +131,39 @@ impl ObjectSelection {
         }
         self.cache.entry(page).or_insert_with(|| doc.editable_objects(page)).clone()
     }
+}
+
+/// The text box a Ctrl+drag of `target` (its user-space `rect`) drops `delta` (screen) away: a
+/// paragraph of the page as an added box in its look, or a copy of an added text box.
+#[allow(clippy::too_many_arguments)]
+fn dropped_copy(
+    xf: &PageXform,
+    info: &DocInfo,
+    page: usize,
+    doc: &Document,
+    target: ObjectTarget,
+    rect: [f64; 4],
+    delta: egui::Vec2,
+) -> Option<pdfcraft_engine::AddedText> {
+    let ph = f64::from(info.pages.get(page)?.height);
+    let display = |p: Pos2| {
+        let (x, y) = xf.screen_to_view(p);
+        [f64::from(x), ph - f64::from(y)]
+    };
+    let from = xf.user_rect(info, page, rect.map(|v| v as f32)).left_bottom();
+    let (a, b) = (display(from), display(from + delta));
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let mut text = match target.kind {
+        ObjectKind::Text => crate::edit_text_ui::paragraph_as_added(xf, info, page, doc.text_blocks(page).get(target.index)?)?,
+        ObjectKind::Added => match &doc.added.iter().filter(|a| a.page == page).nth(target.index)?.content {
+            pdfcraft_engine::AddedContent::Text(t) => t.clone(),
+            pdfcraft_engine::AddedContent::Image(_) => return None,
+        },
+        _ => return None,
+    };
+    let r = text.rect;
+    text.rect = [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy];
+    Some(text)
 }
 
 fn screen(xf: &PageXform, info: &DocInfo, page: usize, object: &EditableObject) -> Rect {
@@ -207,7 +254,31 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
             gesture.now = p;
         }
         if !down {
-            if !gesture.marquee && gesture.start.distance(gesture.now) <= 3.0 && resp.double_clicked() {
+            if let Some((target, rect)) = gesture.copy {
+                s.gesture = None;
+                if gesture.start.distance(gesture.now) <= DRAG_SLOP {
+                    // A Ctrl-click: toggle it in the selection, as every modifier click does.
+                    if let Some(index) = s.selected.iter().position(|o| o.target == target) {
+                        s.selected.remove(index);
+                    } else if let Ok(objects) = s.inventory(doc, page)
+                        && let Some(object) = objects.into_iter().find(|o| o.target == target)
+                    {
+                        if s.selected.len() < MAX_MOVE_OBJECTS {
+                            s.selected.push(object);
+                        } else {
+                            s.notice = Some(tl!("Select at most 1000 objects at a time.").into());
+                        }
+                    }
+                } else if view.pending_edit.is_none()
+                    && let Some(text) = dropped_copy(xf, info, page, doc, target, rect, gesture.now - gesture.start)
+                {
+                    view.content.select_added = Some((page, doc.added.iter().filter(|a| a.page == page).count()));
+                    view.pending_edit = Some(Edit::AddText { page, text });
+                    s.clear();
+                }
+                return true;
+            }
+            if !gesture.marquee && gesture.start.distance(gesture.now) <= DRAG_SLOP && resp.double_clicked() {
                 s.clear();
                 return false;
             }
@@ -247,7 +318,13 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
         } else {
             s.gesture = Some(gesture);
         }
-        ui.ctx().set_cursor_icon(if gesture.marquee { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Grabbing });
+        ui.ctx().set_cursor_icon(if gesture.marquee {
+            egui::CursorIcon::Crosshair
+        } else if gesture.copy.is_some() {
+            egui::CursorIcon::Copy
+        } else {
+            egui::CursorIcon::Grabbing
+        });
         return true;
     }
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p) && ui.clip_rect().contains(*p) && resp.rect.contains(*p)) else {
@@ -293,7 +370,13 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
                 s.selected.push(object.clone());
             }
         }
-        if let Some(object) = hit {
+        if let Some(object) = hit
+            && matches!(object.target.kind, ObjectKind::Text | ObjectKind::Added)
+            && ui.input(|i| i.modifiers.command && !i.modifiers.shift)
+        {
+            // Ctrl on text: a click toggles it on release, a drag drops a copy (Thai edition).
+            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: true, copy: Some((object.target, object.rect)) });
+        } else if let Some(object) = hit {
             if let Some(index) = s.selected.iter().position(|o| o.target == object.target) {
                 s.selected.remove(index);
             } else if s.selected.len() < MAX_MOVE_OBJECTS {
@@ -302,7 +385,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
                 s.notice = Some(tl!("Select at most 1000 objects at a time.").into());
             }
         } else {
-            s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: true });
+            s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: true, copy: None });
         }
         leave_single(view);
         view.current = page;
@@ -312,7 +395,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
         let union = s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o)));
         let edge = s.selected.len() == 1 && on_text_edge(xf, info, page, &s.selected[0], p);
         if union.contains(p) && !edge && !resp.double_clicked() {
-            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false });
+            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false, copy: None });
             return true;
         }
     }
@@ -325,7 +408,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
         s.clear();
         s.page = Some(page);
         s.selected.push(object.clone());
-        s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false });
+        s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false, copy: None });
         leave_single(view);
         view.current = page;
         return true;
@@ -339,7 +422,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
             leave_single(view);
             s.page = Some(page);
             s.selected.push(object.clone());
-            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false });
+            s.gesture = Some(Gesture { start: p, now: p, marquee: false, additive: false, copy: None });
             view.current = page;
             return true;
         }
@@ -347,7 +430,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
     }
     leave_single(view);
     s.page = Some(page);
-    s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: false });
+    s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: false, copy: None });
     view.current = page;
     true
 }
@@ -415,7 +498,8 @@ pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: 
     if selection.page != Some(page) {
         return;
     }
-    let delta = selection.gesture.filter(|g| !g.marquee).map_or(egui::Vec2::ZERO, |g| g.now - g.start);
+    // A Ctrl+drag leaves the selection in place; the copy it drops is drawn below.
+    let delta = selection.gesture.filter(|g| !g.marquee && g.copy.is_none()).map_or(egui::Vec2::ZERO, |g| g.now - g.start);
     let mut union = Rect::NOTHING;
     for object in &selection.selected {
         let rect = screen(xf, info, page, object).translate(delta);
@@ -430,6 +514,14 @@ pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: 
         let area = Rect::from_two_pos(g.start, g.now).intersect(xf.rect);
         painter.rect_filled(area, 0.0, BLUE.gamma_multiply(0.08));
         painter.rect_stroke(area, 0.0, Stroke::new(1.0, BLUE), egui::StrokeKind::Outside);
+    }
+    if let Some(g) = selection.gesture
+        && let Some((_, rect)) = g.copy
+        && g.start.distance(g.now) > DRAG_SLOP
+    {
+        let copy = xf.user_rect(info, page, rect.map(|v| v as f32)).translate(g.now - g.start);
+        painter.rect_filled(copy, 0.0, BLUE.gamma_multiply(0.08));
+        painter.rect_stroke(copy, 0.0, Stroke::new(1.5, BLUE), egui::StrokeKind::Outside);
     }
 }
 

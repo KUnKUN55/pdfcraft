@@ -360,3 +360,78 @@ fn released_text_does_not_jump_back_before_the_page_is_redrawn() {
     let (old, new) = ink_at(&mut h, from, to);
     assert!(new > 20 && old == 0, "the redrawn page has the text in its new place ({old} old, {new} new)");
 }
+
+/// A press at `from`, a move to `to` and the release there, with `mods` held throughout.
+fn drag_with(h: &mut Harness<'static, PdfCraftApp>, from: Pos2, to: Pos2, mods: egui::Modifiers) {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: mods };
+    h.hover_at(from);
+    h.run_steps(1);
+    h.event_modifiers(button(from, true), mods);
+    h.run_steps(1);
+    for k in 1..=4 {
+        let p = from + (to - from) * (k as f32 / 4.0);
+        h.event_modifiers(egui::Event::PointerMoved(p), mods);
+        h.run_steps(1);
+    }
+    h.event_modifiers(button(to, false), mods);
+    h.run_steps(4);
+}
+
+fn text_of(a: &pdfcraft_engine::Added) -> (String, [f64; 4]) {
+    match &a.content {
+        pdfcraft_engine::AddedContent::Text(t) => (t.text.clone(), t.rect),
+        pdfcraft_engine::AddedContent::Image(_) => panic!("an image"),
+    }
+}
+
+/// Thai edition: ⌘C and ⌘V copy a text box as a new one a step down and right (each paste a
+/// step further), and Ctrl held as a box is dropped leaves it where it was and drops a copy.
+#[test]
+fn text_boxes_copy_paste_and_ctrl_drag() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let p = at(&h, 40.0, 300.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Copy me".into()));
+    h.run_steps(2);
+    h.get_by_label("Done adding text").click();
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)), "the new text is selected");
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    for _ in 0..2 {
+        h.event(egui::Event::Paste("Copy me".into()));
+        h.run_steps(3);
+    }
+    let items = added(&h);
+    assert_eq!(items.len(), 3, "two pastes add two boxes");
+    let (first, a) = text_of(&items[0]);
+    for (n, item) in items.iter().enumerate().skip(1) {
+        let (text, r) = text_of(item);
+        assert_eq!(text, first);
+        let step = 12.0 * n as f64;
+        assert!((r[0] - a[0] - step).abs() < 0.01 && (a[3] - r[3] - step).abs() < 0.01, "paste {n}: {a:?} -> {r:?}");
+    }
+    assert_eq!(h.state().views[0].content.selected, Some((0, 2)), "the last paste is selected");
+    // Something else copied since is not pasted as a box.
+    h.event(egui::Event::Paste("Copied elsewhere".into()));
+    h.run_steps(3);
+    assert_eq!(added(&h).len(), 3);
+
+    // Ctrl+drag the first box: it stays, a copy lands where it was dropped.
+    let from = item_on_screen(&h, a);
+    let grab = pos2(from.left() + 6.0, from.center().y);
+    drag_with(&mut h, grab, grab + egui::vec2(0.0, 120.0), egui::Modifiers::COMMAND);
+    let items = added(&h);
+    assert_eq!(items.len(), 4, "Ctrl+drag adds a copy");
+    assert_eq!(text_of(&items[0]).1, a, "the original stays put");
+    let (text, r) = text_of(&items[3]);
+    assert_eq!(text, first);
+    assert!(r[3] < a[3] - 20.0, "the copy is lower on the page: {a:?} -> {r:?}");
+    // Without Ctrl a drag still just moves it.
+    let from = item_on_screen(&h, r);
+    let grab = pos2(from.left() + 6.0, from.center().y);
+    drag_with(&mut h, grab, grab + egui::vec2(60.0, 0.0), egui::Modifiers::NONE);
+    assert_eq!(added(&h).len(), 4, "a plain drag moves, it doesn't copy");
+}

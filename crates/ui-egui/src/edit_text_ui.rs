@@ -272,6 +272,21 @@ fn look_of(b: &pdfcraft_engine::TextBlock) -> pdfcraft_engine::AddedText {
     source_look(&b.base_font, b.size, b.color, b.bold, b.italic)
 }
 
+/// A paragraph of the page as an added text box with its text and look, over the paragraph
+/// (display space), fitted to its rows (Thai edition: Copy and Ctrl+drag of existing text).
+pub(crate) fn paragraph_as_added(xf: &PageXform, info: &DocInfo, page: usize, b: &pdfcraft_engine::TextBlock) -> Option<pdfcraft_engine::AddedText> {
+    let p = info.pages.get(page)?;
+    let r = xf.user_rect(info, page, b.rect.map(|v| v as f32));
+    let ((x0, y0), (x1, y1)) = (xf.screen_to_view(r.left_bottom()), xf.screen_to_view(r.right_top()));
+    let ph = f64::from(p.height);
+    let text = pdfcraft_engine::AddedText {
+        text: b.editor_text.clone(),
+        rect: [f64::from(x0), ph - f64::from(y0), f64::from(x1), ph - f64::from(y1)],
+        ..look_of(b)
+    };
+    Some(pdfcraft_engine::fitted_text(&text, f64::from(p.width)))
+}
+
 fn editor_font(ctx: &egui::Context, look: &pdfcraft_engine::AddedText, size: f32) -> FontId {
     // A craft-fonts or installed family is shown in its own face, as it will be saved.
     if look.family.craft(look.bold, look.italic).is_some() {

@@ -322,7 +322,16 @@ pub(crate) fn page_input(
                     // Text height follows its lines: keep the top edge's offset only.
                     rect = [rect[0], rect[3] - (t.rect[3] - t.rect[1]), rect[2], rect[3]];
                 }
-                view.pending_edit = Some(Edit::UpdateContent { page, index: si, content: a.content.with_rect(rect) });
+                // Ctrl held as a text box is dropped leaves it where it was and adds a copy there
+                // (Thai edition), as in Word.
+                let copying = ui.input(|i| i.modifiers.command);
+                view.pending_edit = Some(match &a.content {
+                    AddedContent::Text(t) if copying && grab == Grab::Move => {
+                        cv.select_added = Some((page, on_page(added, page).len()));
+                        Edit::AddText { page, text: AddedText { rect, ..t.clone() } }
+                    }
+                    _ => Edit::UpdateContent { page, index: si, content: a.content.with_rect(rect) },
+                });
             }
         }
         return consumed;
