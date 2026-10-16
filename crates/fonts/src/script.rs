@@ -4,6 +4,8 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
+use crate::ShapedScript;
+
 static FONT: &[u8] = include_bytes!("../../../assets/fonts/DancingScript.ttf");
 
 /// Inter Regular, the interface font. Typed signatures fall back to it, slanted, for characters
@@ -196,7 +198,45 @@ pub fn script_missing(text: &str) -> Option<char> {
     let charmap = font.charmap();
     let fallback = FontRef::new(INTER_REGULAR).ok();
     let fallback_map = fallback.as_ref().map(|f| f.charmap());
-    text.chars().find(|c| !c.is_whitespace() && charmap.map(*c).is_none() && fallback_map.as_ref().and_then(|m| m.map(*c)).is_none())
+    let thai = crate::thai_text::available();
+    text.chars().find(|c| {
+        !c.is_whitespace()
+            && !(thai && crate::thai_text::is_thai(*c))
+            && charmap.map(*c).is_none()
+            && fallback_map.as_ref().and_then(|m| m.map(*c)).is_none()
+    })
+}
+
+/// Thai edition: Thai in a typed signature is drawn from TH Sarabun PSK Italic (shaped, so vowels
+/// and tone marks sit on their letters), this many times its em so it matches the script's size.
+const THAI_SIGNATURE_SCALE: f64 = 1.3;
+
+/// Draw a run of Thai at the pen's position, shaped; `false` when this build has no Thai face.
+fn thai_run(pen: &mut Flatten, run: &str) -> bool {
+    let Some(face) = crate::thai_text::signature_face() else { return false };
+    let shaped = match face {
+        ShapedScript::Thai => crate::shape_thai(run),
+        other => crate::shape_face(run, other, true),
+    };
+    let Ok(clusters) = shaped else { return false };
+    let k = THAI_SIGNATURE_SCALE;
+    for c in &clusters {
+        for (id, [ox, oy]) in &c.glyphs {
+            let Ok(g) = crate::shaped_glyph(c.script, *id) else { continue };
+            for contour in g.contours {
+                if contour.len() < 3 {
+                    continue;
+                }
+                pen.close();
+                for [x, y] in contour {
+                    pen.push([pen.dx + (ox + x) * k, (oy + y) * k]);
+                }
+            }
+        }
+        pen.close();
+        pen.dx += c.advance * k;
+    }
+    true
 }
 
 /// The outlines of `text` in the script font. Characters it lacks (Cyrillic, Greek, …) are drawn
@@ -229,7 +269,17 @@ pub fn script_outline(text: &str) -> ScriptOutline {
     // The 4096-point budget is for one untrusted document glyph (japanese_glyph), not a
     // whole signature in our bundled font. Keep a separate bounded budget for the line.
     pen.max_points = 262_144;
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if crate::thai_text::is_thai(ch) && crate::thai_text::available() {
+            let mut run = ch.to_string();
+            while let Some(&next) = chars.peek().filter(|c| crate::thai_text::is_thai(**c)) {
+                run.push(next);
+                chars.next();
+            }
+            thai_run(&mut pen, &run);
+            continue;
+        }
         if let Some(gid) = charmap.map(ch) {
             (pen.scale, pen.slant) = (scale, 0.0);
             if let Some(g) = glyphs.get(gid) {
@@ -291,6 +341,23 @@ mod tests {
         let mixed = super::script_outline("Ana Ана");
         let latin_only = super::script_outline("Ana ");
         assert!(mixed.width > latin_only.width + 0.5, "{} vs {}", mixed.width, latin_only.width);
+    }
+
+    /// Thai edition: a Thai name is drawn shaped from TH Sarabun PSK when the build has it.
+    #[test]
+    fn thai_names_are_drawn_when_the_build_has_the_thai_face() {
+        if !crate::thai_text::available() {
+            assert_eq!(super::script_missing("สมชาย"), Some('ส'));
+            return;
+        }
+        assert_eq!(super::script_missing("สมชาย Ada"), None);
+        let o = super::script_outline("สมชาย");
+        assert!(o.contours.len() >= 5 && o.width > 1.0, "{} contours, width {}", o.contours.len(), o.width);
+        // The tone mark of น้ำ sits above its letter, inside the outline's bounds.
+        let tall = super::script_outline("น้ำ").contours.iter().flatten().map(|p| p[1]).fold(0.0, f64::max);
+        assert!(tall > super::script_outline("น").contours.iter().flatten().map(|p| p[1]).fold(0.0, f64::max));
+        let mixed = super::script_outline("Ada สมชาย");
+        assert!(mixed.width > super::script_outline("Ada ").width + 1.0, "{}", mixed.width);
     }
 
     #[test]

@@ -378,12 +378,18 @@ pub fn date_language(code: &str) -> Option<&'static DateLanguage> {
 
 /// The characters of `text` that Fill & Sign can't write into a PDF yet, each once. Its text is
 /// drawn in Helvetica with WinAnsi encoding (Western European letters), so anything else (`ř`,
-/// Japanese, Chinese) would become `?` in the file.
+/// Japanese, Chinese) would become `?` in the file — except Thai, drawn in TH Sarabun PSK when
+/// this build has it (Thai edition).
 pub fn unwritable(text: &str) -> String {
+    let thai = pdfcraft_fonts::thai_text::available();
     let mut out = String::new();
     for c in text.chars() {
         let mut buf = [0u8; 4];
-        if c != '?' && pdfcraft_fonts::win_ansi(c.encode_utf8(&mut buf)) == b"?" && !out.contains(c) {
+        if c != '?'
+            && !(thai && pdfcraft_fonts::thai_text::is_thai(c))
+            && pdfcraft_fonts::win_ansi(c.encode_utf8(&mut buf)) == b"?"
+            && !out.contains(c)
+        {
             out.push(c);
         }
     }

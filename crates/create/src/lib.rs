@@ -641,7 +641,8 @@ pub fn from_text(title: &str, text: &str, page: (f64, f64), font_size: f64) -> R
 /// The line (1-based) and character of the first one Helvetica can't draw. Line breaks, tabs and
 /// form feeds (new pages) are layout, not drawn.
 fn first_undrawable_line(text: &str) -> Option<(usize, char)> {
-    text.split('\n').enumerate().find_map(|(i, l)| pdfcraft_fonts::first_undrawable(&l.replace('\u{c}', "")).map(|c| (i + 1, c)))
+    // Thai is set in TH Sarabun PSK when this build has it (Thai edition).
+    text.split('\n').enumerate().find_map(|(i, l)| pdfcraft_fonts::thai_text::first_undrawable(&l.replace('\u{c}', "")).map(|c| (i + 1, c)))
 }
 
 /// What a PDF made from text PdfCraft generated says, in its first line, about characters it
@@ -656,7 +657,7 @@ pub fn from_text_escaped(title: &str, text: &str, page: (f64, f64), font_size: f
     let mut escaped = 0usize;
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if matches!(c, '\n' | '\r' | '\u{c}') || pdfcraft_fonts::first_undrawable(c.encode_utf8(&mut [0; 4])).is_none() {
+        if matches!(c, '\n' | '\r' | '\u{c}') || pdfcraft_fonts::thai_text::first_undrawable(c.encode_utf8(&mut [0; 4])).is_none() {
             out.push(c);
         } else {
             escaped = escaped.saturating_add(1);
@@ -676,11 +677,17 @@ fn set_text(title: &str, text: &str, page: (f64, f64), font_size: f64) -> Result
     let margin = 72.0;
     let line_h = size * 1.25;
     let width = (w - 2.0 * margin).max(36.0);
+    // Thai wraps between clusters and is set in TH Sarabun PSK (Thai edition).
+    let thai = pdfcraft_fonts::thai_text::has_thai(text) && pdfcraft_fonts::thai_text::available();
+    let helvetica = |s: &str, size: f64| pdfcraft_fonts::helvetica_width(s, size);
     let lines: Vec<String> = text
         .replace("\r\n", "\n")
         .replace('\t', "    ")
         .split('\u{c}')
-        .flat_map(|p| wrap(p, size, width).into_iter().chain(std::iter::once("\u{c}".to_string())))
+        .flat_map(|p| {
+            let wrapped = if thai { pdfcraft_fonts::thai_text::wrap(p, size, width, false, false, &helvetica) } else { wrap(p, size, width) };
+            wrapped.into_iter().chain(std::iter::once("\u{c}".to_string()))
+        })
         .collect();
     let per_page = (((h - 2.0 * margin) / line_h).floor() as usize).max(1);
     let mut doc = Document::new_empty();
@@ -703,14 +710,27 @@ fn set_text(title: &str, text: &str, page: (f64, f64), font_size: f64) -> Result
         }
     }
     for lines in page_lines {
-        let mut c = format!("BT /F1 {size} Tf {line_h:.3} TL {margin} {:.3} Td\n", h - margin - size).into_bytes();
-        for l in lines {
-            c.extend(literal(&win_ansi(&l)));
-            c.extend_from_slice(b" Tj T*\n");
-        }
-        c.extend_from_slice(b"ET\n");
         let mut fonts = Dict::new();
         fonts.set(b"F1".to_vec(), Object::Ref(fr));
+        let c = if lines.iter().any(|l| pdfcraft_fonts::thai_text::has_thai(l)) && thai {
+            let placed: Vec<(String, f64, f64)> =
+                lines.into_iter().enumerate().map(|(i, l)| (l, margin, h - margin - size - i as f64 * line_h)).collect();
+            let drawn = pdfcraft_fonts::thai_text::draw(&mut doc, &placed, size, false, false, "F1", &helvetica, "PCTh")
+                .map_err(|_| CreateError::Invalid("the Thai text couldn't be set".into()))?;
+            pdfcraft_fonts::thai_text::add_fonts(&mut fonts, &drawn);
+            let mut c = b"BT\n".to_vec();
+            c.extend(drawn.ops);
+            c.extend_from_slice(b"ET\n");
+            c
+        } else {
+            let mut c = format!("BT /F1 {size} Tf {line_h:.3} TL {margin} {:.3} Td\n", h - margin - size).into_bytes();
+            for l in lines {
+                c.extend(literal(&win_ansi(&l)));
+                c.extend_from_slice(b" Tj T*\n");
+            }
+            c.extend_from_slice(b"ET\n");
+            c
+        };
         let mut res = Dict::new();
         res.set(b"Font".to_vec(), Object::Dict(fonts));
         add_page(&mut doc, w, h, res, Some(c))?;

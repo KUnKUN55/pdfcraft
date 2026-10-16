@@ -14,7 +14,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use pdfcraft_cos::{Dict, Document, Object, Stream};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
 use pdfcraft_fonts::{helvetica_width, literal, win_ansi};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -380,10 +380,60 @@ const END: &str = "EMC\nQ\n";
 /// such character would become a `?` on the page (#125). `lines` must split the text the way the
 /// caller draws it, so a `\r` that would be drawn is refused too.
 pub(crate) fn drawable<'a>(lines: impl IntoIterator<Item = &'a str>) -> Result<(), EditError> {
-    match lines.into_iter().find_map(pdfcraft_fonts::first_non_win_ansi) {
+    // Thai is drawn in TH Sarabun PSK when this build has it (Thai edition).
+    let thai = pdfcraft_fonts::thai_text::available();
+    match lines
+        .into_iter()
+        .find_map(|l| l.chars().find(|c| !pdfcraft_fonts::win_ansi_encodable(*c) && !(thai && pdfcraft_fonts::thai_text::is_thai(*c))))
+    {
         Some(c) => Err(undrawable(c)),
         None => Ok(()),
     }
+}
+
+/// Lines of page text — each its text and baseline origin — as text-showing operators: with Thai,
+/// shaped in TH Sarabun PSK (Type 3 fonts added to the page's resources), the rest in `/PCHelv`
+/// (Thai edition). Call after [`add_resources`], which writes the page's own resources.
+fn text_lines_on_page(doc: &mut Document, page: usize, lines: &[(String, f64, f64)], size: f64) -> Result<Vec<u8>, EditError> {
+    if !lines.iter().any(|(l, ..)| pdfcraft_fonts::thai_text::has_thai(l)) {
+        return Ok(lines.iter().flat_map(|(l, x, y)| text_op(*x, *y, l)).collect());
+    }
+    let p = page_list(doc).swap_remove(page);
+    let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    let mut fonts = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    // A prefix no font on the page has yet, so marks never replace each other's glyphs.
+    let prefix = (0u32..)
+        .map(|k| format!("PCTh{k}_"))
+        .find(|p| !fonts.iter().any(|(name, _)| name.starts_with(p.as_bytes())))
+        .unwrap_or_else(|| "PCThX_".into());
+    let drawn = pdfcraft_fonts::thai_text::draw(doc, lines, size, false, false, "PCHelv", &helvetica_width, &prefix)
+        .map_err(|_| EditError::Invalid("Thai text needs the Thai font this build doesn't include".into()))?;
+    pdfcraft_fonts::thai_text::add_fonts(&mut fonts, &drawn);
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(p.obj, |d| d.set(b"Resources".to_vec(), Object::Dict(res)))?;
+    Ok(drawn.ops)
+}
+
+/// Add fonts (name and object, e.g. Thai Type 3 fonts from `pdfcraft_fonts::thai_text::draw`) to
+/// page `page`'s own `/Font` resources, for content [`stamp`] put there (Thai edition).
+pub fn add_page_fonts(doc: &mut Document, page: usize, fonts: &[(String, ObjRef)]) -> Result<(), EditError> {
+    if fonts.is_empty() {
+        return Ok(());
+    }
+    let p = page_list(doc).into_iter().nth(page).ok_or(EditError::NoSuchPage(page))?;
+    let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    let mut dict = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    for (name, font) in fonts {
+        dict.set(name.clone().into_bytes(), Object::Ref(*font));
+    }
+    res.set(b"Font".to_vec(), Object::Dict(dict));
+    doc.update_dict(p.obj, |d| d.set(b"Resources".to_vec(), Object::Dict(res)))?;
+    Ok(())
+}
+
+/// The width of a line of page text in `/PCHelv`, its Thai shaped (Thai edition).
+fn page_text_width(line: &str, size: f64) -> f64 {
+    pdfcraft_fonts::thai_text::line_width(line, size, false, false, &helvetica_width)
 }
 
 /// The refusal for page text with `c`, which nothing here can draw.
@@ -447,6 +497,7 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let [top, bottom, left, right] = hf.margins;
         let mut body: Vec<u8> = format!("BT\n/PCHelv {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
         let mut underlines = String::new();
+        let mut placed = Vec::new();
         for (slot, template) in hf.text.iter().enumerate() {
             if template.trim().is_empty() {
                 continue;
@@ -455,7 +506,7 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
             let header = slot < 3;
             let line_h = size * 1.2;
             for (li, line) in lines.iter().enumerate() {
-                let tw = helvetica_width(line, size);
+                let tw = page_text_width(line, size);
                 let x = match slot % 3 {
                     0 => left,
                     1 => (w - tw) / 2.0,
@@ -463,20 +514,22 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
                 };
                 // Headers hang below the top margin; footers sit on the bottom margin.
                 let y = if header { h - top - size * 0.8 - li as f64 * line_h } else { bottom + (lines.len() - 1 - li) as f64 * line_h };
-                body.extend(text_op(x, y, line));
+                placed.push((line.clone(), x, y));
                 if hf.underline {
                     underlines.push_str(&format!("{} {} {} {} re f\n", n(x), n(y - size * 0.15), n(tw), n((size * 0.06).max(0.4))));
                 }
             }
         }
+        let view = page.view_matrix(doc);
+        add_resources(doc, page, None, None)?;
+        body.extend(text_lines_on_page(doc, i, &placed, size)?);
         body.extend_from_slice(b"ET\n");
         if !underlines.is_empty() {
             body.extend(format!("{}\n{underlines}", rgb(hf.color)).bytes());
         }
-        let mut content = begin(MarkKind::HeaderFooter, "Header", page.view_matrix(doc)).into_bytes();
+        let mut content = begin(MarkKind::HeaderFooter, "Header", view).into_bytes();
         content.extend(body);
         content.extend_from_slice(END.as_bytes());
-        add_resources(doc, page, None, None)?;
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::HeaderFooter, content, false)?;
     }
@@ -521,7 +574,7 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
             place(doc, page, MarkKind::Watermark, content.into_bytes(), wm.behind)?;
             continue;
         }
-        let widest = lines.iter().map(|l| helvetica_width(l, 1.0)).fold(0.0, f64::max).max(0.01);
+        let widest = lines.iter().map(|l| page_text_width(l, 1.0)).fold(0.0, f64::max).max(0.01);
         let size = if wm.font_size > 0.0 { wm.font_size } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
         let (s, c) = wm.rotation.to_radians().sin_cos();
         let (cx, cy) = (w / 2.0 + wm.offset[0], h / 2.0 + wm.offset[1]);
@@ -543,13 +596,15 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
         );
         let line_h = size * 1.15;
         let total = line_h * (lines.len() as f64 - 1.0);
-        for (li, line) in lines.iter().enumerate() {
-            let tw = helvetica_width(line, size);
-            content.extend(text_op(-tw / 2.0, total / 2.0 - li as f64 * line_h - size * 0.35, line));
-        }
+        let placed: Vec<(String, f64, f64)> = lines
+            .iter()
+            .enumerate()
+            .map(|(li, line)| (line.to_string(), -page_text_width(line, size) / 2.0, total / 2.0 - li as f64 * line_h - size * 0.35))
+            .collect();
+        add_resources(doc, &page, Some(opacity), None)?;
+        content.extend(text_lines_on_page(doc, i, &placed, size)?);
         content.extend_from_slice(b"ET\n");
         content.extend_from_slice(END.as_bytes());
-        add_resources(doc, &page, Some(opacity), None)?;
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::Watermark, content, wm.behind)?;
     }

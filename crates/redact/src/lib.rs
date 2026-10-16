@@ -206,8 +206,22 @@ pub(crate) fn page_streams(doc: &Document, page: &Dict, index: usize) -> Result<
     Ok((list, data))
 }
 
-/// The boxes and overlay text drawn for the applied marks.
-fn overlay_content(marks: &[&Mark]) -> Vec<u8> {
+/// Content and the Thai Type 3 fonts it uses (name, object).
+type Overlay = (Vec<u8>, Vec<(String, ObjRef)>);
+
+/// The boxes and overlay text drawn for the applied marks on page `page`, and the fonts its Thai
+/// needs (Type 3, shaped in TH Sarabun PSK; Thai edition) for the page's resources.
+fn overlay_content(doc: &mut Document, page: usize, marks: &[&Mark]) -> Result<Overlay, RedactError> {
+    let mut thai_fonts = Vec::new();
+    // A prefix no font on the page has yet.
+    let taken: Vec<Vec<u8>> = pdfcraft_model::pages(doc)
+        .into_iter()
+        .nth(page)
+        .and_then(|p| p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()))
+        .and_then(|r| r.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()))
+        .map(|f| f.iter().map(|(name, _)| name.clone()).collect())
+        .unwrap_or_default();
+    let mut next_prefix = (0u32..).map(|k| format!("PCThR{k}_")).filter(move |p| !taken.iter().any(|name| name.starts_with(p.as_bytes())));
     let n = |v: f64| {
         let s = format!("{:.3}", v);
         s.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -232,7 +246,11 @@ fn overlay_content(marks: &[&Mark]) -> Vec<u8> {
             pdfcraft_annot::OverlayFont::Times => ("PCTimes", pdfcraft_fonts::Std14::TimesRoman),
             pdfcraft_annot::OverlayFont::Courier => ("PCCour", pdfcraft_fonts::Std14::Courier),
         };
-        let width = move |s: &str, size: f64| face.text_width(s, size);
+        let latin_width = move |s: &str, size: f64| face.text_width(s, size);
+        let thai = pdfcraft_fonts::thai_text::has_thai(&m.overlay) && pdfcraft_fonts::thai_text::available();
+        let width = |s: &str, size: f64| {
+            if thai { pdfcraft_fonts::thai_text::line_width(s, size, false, false, &latin_width) } else { latin_width(s, size) }
+        };
         let [cr, cg, cb] = look.color.map(|v| v.clamp(0.0, 1.0));
         for r in &m.rects {
             let (w, h) = (r[2] - r[0], r[3] - r[1]);
@@ -258,6 +276,7 @@ fn overlay_content(marks: &[&Mark]) -> Vec<u8> {
             c.extend(
                 format!("q {} {} {} {} re W n BT {} {} {} rg /{res} {} Tf ", n(r[0]), n(r[1]), n(w), n(h), n(cr), n(cg), n(cb), n(size)).bytes(),
             );
+            let mut placed = Vec::new();
             for line in &lines {
                 let lw = width(line, size);
                 let x = match look.align {
@@ -265,15 +284,26 @@ fn overlay_content(marks: &[&Mark]) -> Vec<u8> {
                     2 => r[2] - 1.0 - lw,
                     _ => r[0] + (w - lw) / 2.0,
                 };
-                c.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-                c.extend_from_slice(&pdfcraft_fonts::literal(&pdfcraft_fonts::win_ansi(line)));
-                c.extend_from_slice(b" Tj ");
+                placed.push((line.clone(), x, y));
                 y -= size * 1.2;
+            }
+            if thai {
+                let prefix = next_prefix.next().unwrap_or_else(|| "PCThRX_".into());
+                let drawn = pdfcraft_fonts::thai_text::draw(doc, &placed, size, false, false, res, &latin_width, &prefix)
+                    .map_err(|_| RedactError::Undrawable("the overlay text's Thai couldn't be drawn (nothing was redacted)".into()))?;
+                c.extend(&drawn.ops);
+                thai_fonts.extend(drawn.fonts);
+            } else {
+                for (line, x, y) in &placed {
+                    c.extend(format!("1 0 0 1 {} {} Tm ", n(*x), n(*y)).bytes());
+                    c.extend_from_slice(&pdfcraft_fonts::literal(&pdfcraft_fonts::win_ansi(line)));
+                    c.extend_from_slice(b" Tj ");
+                }
             }
             c.extend_from_slice(b"ET Q\n");
         }
     }
-    c
+    Ok((c, thai_fonts))
 }
 
 /// The nearest ancestor of `page` that holds `/Resources` (where an inheriting page gets them):
@@ -377,7 +407,8 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     }
     // Overlay text is drawn in Helvetica; applying can't be undone in the file, so text it can't
     // draw (a mark another program made) is refused before anything changes, never burnt in as `?`.
-    if let Some((m, c)) = chosen.iter().find_map(|m| pdfcraft_fonts::first_undrawable(&m.overlay).map(|c| (m, c))) {
+    // Thai is drawn in TH Sarabun PSK when this build has it (Thai edition).
+    if let Some((m, c)) = chosen.iter().find_map(|m| pdfcraft_fonts::thai_text::first_undrawable(&m.overlay).map(|c| (m, c))) {
         return Err(RedactError::Undrawable(format!(
             "{}; change or clear that mark's overlay text, then apply again (nothing was redacted)",
             pdfcraft_fonts::undrawable_message(&format!("the overlay text of a redaction mark on page {}", m.page + 1), c)
@@ -560,9 +591,10 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     // 4. The boxes.
     for &pi in &by_page {
         let page_marks: Vec<&Mark> = chosen.iter().copied().filter(|m| m.page == pi).collect();
-        let content = overlay_content(&page_marks);
+        let (content, fonts) = overlay_content(doc, pi, &page_marks)?;
         if !content.is_empty() {
             pdfcraft_edit::stamp(doc, pi, "Redaction", content)?;
+            pdfcraft_edit::add_page_fonts(doc, pi, &fonts)?;
         }
     }
 

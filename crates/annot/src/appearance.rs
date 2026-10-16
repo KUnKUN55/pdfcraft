@@ -11,8 +11,8 @@
 //! Helvetica's proportions by character class (no font program or metrics file is bundled).
 
 use pdfcraft_cos::{Dict, Object, PdfString, Stream};
-use pdfcraft_fonts::{first_undrawable, literal, win_ansi};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
+use pdfcraft_fonts::{literal, win_ansi};
 
 use crate::{NOTE_SIZE, Rgb, n};
 
@@ -284,13 +284,34 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
         b"Redact" => ("the redaction's overlay text", text(b"OverlayText")?),
         _ => return None,
     };
-    Some((what, first_undrawable(&text)?))
+    // Thai is drawn in TH Sarabun PSK when this build has it ([`build_with`]; Thai edition).
+    Some((what, pdfcraft_fonts::thai_text::first_undrawable(&text)?))
+}
+
+/// Whether [`build_with`] needs the document to draw `d`: its text has Thai (Thai edition).
+pub fn draws_thai(d: &Dict) -> bool {
+    if !pdfcraft_fonts::thai_text::available() {
+        return false;
+    }
+    let text = |key: &[u8]| d.get(key).and_then(Object::as_string).map(PdfString::to_text).unwrap_or_default();
+    let thai = pdfcraft_fonts::thai_text::has_thai;
+    match d.name(b"Subtype") {
+        Some(b"FreeText") => thai(&text(b"Contents")),
+        Some(b"Line" | b"PolyLine" | b"Polygon") => thai(&text(b"PCMeasureValue")),
+        Some(b"Stamp") => thai(&text(b"PCByLine")),
+        _ => false,
+    }
 }
 
 /// Draw the normal appearance of an annotation, or `None` if this subtype/variant isn't supported.
 /// Text the standard fonts can't draw comes out as `?`: [`undrawable_text`] says which, and
 /// [`crate::set_appearance`] marks the annotation with it (`pdfcraft_fonts::UNDRAWN_MARK`).
 pub fn build(d: &Dict) -> Option<Stream> {
+    build_with(d, &mut None)
+}
+
+/// [`build`]; with the document, Thai is drawn as Type 3 glyphs written into it (Thai edition).
+pub fn build_with(d: &Dict, thai: &mut Option<&mut pdfcraft_cos::Document>) -> Option<Stream> {
     // Imported measurement appearances may include leaders, captions and formatting that
     // this builder cannot reproduce. Preserve them rather than silently losing detail.
     if d.contains(b"Measure") && !d.contains(b"PCMeasureValue") {
@@ -648,7 +669,7 @@ pub fn build(d: &Dict) -> Option<Stream> {
                         }
                         [0.0, 0.0, dw, dh]
                     };
-                    let mut stream = stamp(kind, draw, stroke.unwrap_or(kind.color()), by.as_deref(), opacity, res);
+                    let mut stream = stamp(kind, draw, stroke.unwrap_or(kind.color()), by.as_deref(), opacity, res, thai)?;
                     if turn != 0 {
                         // Upright in the stamp's displayed box, then mapped into `/Rect` the way
                         // the page maps display space into user space. Viewers fit that box to
@@ -726,30 +747,45 @@ pub fn build(d: &Dict) -> Option<Stream> {
                 rg(text_color)
             ));
             let mut out = c.into_bytes();
+            // Thai is wrapped between clusters and drawn in TH Sarabun PSK (Thai edition).
+            let shaped = thai.is_some() && draws_thai(d);
+            let lines =
+                if shaped { pdfcraft_fonts::thai_text::wrap(&text, size, width, false, false, &text_width) } else { wrap(&text, size, width) };
+            let measure = |line: &str| {
+                if shaped { pdfcraft_fonts::thai_text::line_width(line, size, false, false, &text_width) } else { text_width(line, size) }
+            };
+            let mut placed = Vec::new();
             let mut y = rect[3] - pad - size * 0.9;
-            for line in wrap(&text, size, width) {
+            for line in lines {
                 if y < rect[1] - size {
                     break;
                 }
-                let lw = text_width(&line, size);
+                let lw = measure(&line);
                 let x = match q {
                     1 => rect[0] + pad + (width - lw) / 2.0,
                     2 => rect[2] - pad - lw,
                     _ => rect[0] + pad,
                 };
-                out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-                out.extend(literal(&win_ansi(&line)));
-                out.extend_from_slice(b" Tj\n");
+                placed.push((line, x, y));
                 y -= size * 1.2;
             }
-            out.extend_from_slice(b"ET\n");
-            let mut font = Dict::new();
-            font.set(b"Type".to_vec(), Object::name("Font"));
-            font.set(b"Subtype".to_vec(), Object::name("Type1"));
-            font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-            font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
             let mut fonts = Dict::new();
-            fonts.set(b"Helv".to_vec(), Object::Dict(font));
+            fonts.set(b"Helv".to_vec(), helvetica());
+            match thai.as_deref_mut().filter(|_| shaped) {
+                Some(doc) => {
+                    let drawn = pdfcraft_fonts::thai_text::draw(doc, &placed, size, false, false, "Helv", &text_width, "PCTh").ok()?;
+                    out.extend(&drawn.ops);
+                    pdfcraft_fonts::thai_text::add_fonts(&mut fonts, &drawn);
+                }
+                None => {
+                    for (line, x, y) in &placed {
+                        out.extend(format!("1 0 0 1 {} {} Tm ", n(*x), n(*y)).bytes());
+                        out.extend(literal(&win_ansi(line)));
+                        out.extend_from_slice(b" Tj\n");
+                    }
+                }
+            }
+            out.extend_from_slice(b"ET\n");
             res.set(b"Font".to_vec(), Object::Dict(fonts));
             return Some(form(full, &out, res));
         }
@@ -765,17 +801,26 @@ pub fn build(d: &Dict) -> Option<Stream> {
             let x = (rect[0] + rect[2] - text_width(&value, size)) * 0.5;
             let y = rect[3] - 12.0;
             let col = stroke.unwrap_or([0.0, 0.47, 0.84]);
-            out.extend(format!("{}BT /Helv {} Tf {} {} Td ", rg(col), n(size), n(x), n(y)).bytes());
-            // WinAnsi bytes (e.g. 0xB2 for "²") go into the stream as-is, not through UTF-8.
-            out.extend(literal(&win_ansi(&value)));
-            out.extend_from_slice(b" Tj ET\n");
-            let mut font = Dict::new();
-            font.set(b"Type".to_vec(), Object::name("Font"));
-            font.set(b"Subtype".to_vec(), Object::name("Type1"));
-            font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-            font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
             let mut fonts = Dict::new();
-            fonts.set(b"Helv".to_vec(), Object::Dict(font));
+            fonts.set(b"Helv".to_vec(), helvetica());
+            match thai.as_deref_mut().filter(|_| draws_thai(d)) {
+                // A Thai label in TH Sarabun PSK, centred by its shaped width (Thai edition).
+                Some(doc) => {
+                    let w = pdfcraft_fonts::thai_text::line_width(&value, size, false, false, &text_width);
+                    let x = (rect[0] + rect[2] - w) * 0.5;
+                    let drawn = pdfcraft_fonts::thai_text::draw(doc, &[(value, x, y)], size, false, false, "Helv", &text_width, "PCTh").ok()?;
+                    out.extend(format!("{}BT ", rg(col)).bytes());
+                    out.extend(&drawn.ops);
+                    out.extend_from_slice(b"ET\n");
+                    pdfcraft_fonts::thai_text::add_fonts(&mut fonts, &drawn);
+                }
+                None => {
+                    out.extend(format!("{}BT /Helv {} Tf {} {} Td ", rg(col), n(size), n(x), n(y)).bytes());
+                    // WinAnsi bytes (e.g. 0xB2 for "²") go into the stream as-is, not through UTF-8.
+                    out.extend(literal(&win_ansi(&value)));
+                    out.extend_from_slice(b" Tj ET\n");
+                }
+            }
             res.set(b"Font".to_vec(), Object::Dict(fonts));
         }
     }
@@ -784,7 +829,15 @@ pub fn build(d: &Dict) -> Option<Stream> {
 
 /// A rubber stamp: a rounded frame (a pointed tag for sign-here stamps) with the label in bold
 /// capitals, and the dynamic stamps' "By … at …" line.
-fn stamp(kind: crate::StampKind, rect: [f64; 4], col: Rgb, by: Option<&str>, opacity: f64, mut res: Dict) -> Stream {
+fn stamp(
+    kind: crate::StampKind,
+    rect: [f64; 4],
+    col: Rgb,
+    by: Option<&str>,
+    opacity: f64,
+    mut res: Dict,
+    thai: &mut Option<&mut pdfcraft_cos::Document>,
+) -> Option<Stream> {
     let [x0, y0, x1, y1] = rect;
     let h = y1 - y0;
     let mut c = String::new();
@@ -877,18 +930,30 @@ fn stamp(kind: crate::StampKind, rect: [f64; 4], col: Rgb, by: Option<&str>, opa
     );
     out.extend(literal(&win_ansi(label)));
     out.extend_from_slice(b" Tj\n");
+    let mut thai_fonts = None;
     if let Some(b) = by {
+        // A Thai name in the "By …" line is drawn in TH Sarabun PSK (Thai edition).
+        let shaped = thai.is_some() && pdfcraft_fonts::thai_text::available() && pdfcraft_fonts::thai_text::has_thai(b);
+        let width = |s: f64| if shaped { pdfcraft_fonts::thai_text::line_width(b, s, false, false, &text_width) } else { text_width(b, s) };
         let mut s = by_h;
-        let bw = text_width(b, s);
+        let bw = width(s);
         if bw > text_area.1 - text_area.0 - 4.0 {
             s *= (text_area.1 - text_area.0 - 4.0) / bw;
         }
-        let bw = text_width(b, s);
-        out.extend(
-            format!("/Helv {} Tf\n1 0 0 1 {} {} Tm ", n(s), n(text_area.0 + (text_area.1 - text_area.0 - bw) / 2.0), n(y0 + h * 0.18)).bytes(),
-        );
-        out.extend(literal(&win_ansi(b)));
-        out.extend_from_slice(b" Tj\n");
+        let bw = width(s);
+        let (x, y) = (text_area.0 + (text_area.1 - text_area.0 - bw) / 2.0, y0 + h * 0.18);
+        match thai.as_deref_mut().filter(|_| shaped) {
+            Some(doc) => {
+                let drawn = pdfcraft_fonts::thai_text::draw(doc, &[(b.to_string(), x, y)], s, false, false, "Helv", &text_width, "PCTh").ok()?;
+                out.extend(&drawn.ops);
+                thai_fonts = Some(drawn);
+            }
+            None => {
+                out.extend(format!("/Helv {} Tf\n1 0 0 1 {} {} Tm ", n(s), n(x), n(y)).bytes());
+                out.extend(literal(&win_ansi(b)));
+                out.extend_from_slice(b" Tj\n");
+            }
+        }
     }
     out.extend_from_slice(b"ET\n");
     let font = |base: &str| {
@@ -902,8 +967,21 @@ fn stamp(kind: crate::StampKind, rect: [f64; 4], col: Rgb, by: Option<&str>, opa
     let mut fonts = Dict::new();
     fonts.set(b"HelvB".to_vec(), font("Helvetica-Bold"));
     fonts.set(b"Helv".to_vec(), font("Helvetica"));
+    if let Some(drawn) = &thai_fonts {
+        pdfcraft_fonts::thai_text::add_fonts(&mut fonts, drawn);
+    }
     res.set(b"Font".to_vec(), Object::Dict(fonts));
-    form(rect, &out, res)
+    Some(form(rect, &out, res))
+}
+
+/// Helvetica in WinAnsiEncoding, as every generated appearance names it (`/Helv`).
+fn helvetica() -> Object {
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+    font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+    Object::Dict(font)
 }
 
 /// An ellipse inscribed in a rectangle, as four Bézier arcs.

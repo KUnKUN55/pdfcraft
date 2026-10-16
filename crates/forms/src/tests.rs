@@ -278,6 +278,24 @@ fn text_fields_get_new_appearances() {
 }
 
 #[test]
+fn thai_values_draw_in_the_thai_face_when_the_build_has_it() {
+    let mut doc = fixture();
+    let set = set_value(&mut doc, "name", &FieldValue::Text("สมชาย Hopper".into()));
+    if !pdfcraft_fonts::thai_text::available() {
+        return;
+    }
+    set.unwrap();
+    set_value(&mut doc, "notes", &FieldValue::Text("ข้อความหลายบรรทัดในช่องฟอร์มที่ยาวพอจะต้องตัดขึ้นบรรทัดใหม่".into())).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    assert_eq!(field(&all, "name").value, ["สมชาย Hopper"]);
+    let name_ap = ap(&doc, &field(&all, "name").widgets[0]);
+    assert!(name_ap.contains("/PCTh0 ") && name_ap.contains("Hopper) Tj") && !name_ap.contains('?'), "{name_ap}");
+    let notes = ap(&doc, &field(&all, "notes").widgets[0]);
+    assert!(notes.matches("Tm").count() >= 2, "wrapped: {notes}");
+}
+
+#[test]
 fn existing_field_font_encoding_keeps_italian_punctuation_visible() {
     // ReportLab-style Helvetica: an indirect encoding dictionary with PDFDoc-like Differences.
     // WinAnsi 0x92/0x97 would show trademark/Scaron in this font, not quoteright/emdash.

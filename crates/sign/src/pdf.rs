@@ -1949,7 +1949,11 @@ pub fn display_date(pdf: &str) -> String {
 /// character Helvetica can't draw: signing invisibly, or leaving that part out, still works. A
 /// graphic doesn't change this: the name it replaces on the left is still among the details.
 fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate, opts: &SignOptions) -> Result<Stream, SignError> {
-    use pdfcraft_fonts::{first_undrawable, helvetica_width, literal, undrawable_message, win_ansi, wrap};
+    use pdfcraft_fonts::thai_text::first_undrawable;
+    use pdfcraft_fonts::{helvetica_width, literal, undrawable_message, win_ansi};
+    // Thai is set in TH Sarabun PSK when this build has it, wrapped between clusters (Thai edition).
+    let measure = |s: &str, size: f64| pdfcraft_fonts::thai_text::line_width(s, size, false, false, &helvetica_width);
+    let wrap = |s: &str, size: f64, width: f64| pdfcraft_fonts::thai_text::wrap(s, size, width, false, false, &helvetica_width);
     let (w, h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
     let a = &opts.appearance;
     let dn = cert.subject.display();
@@ -1996,6 +2000,7 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
     lines.retain(|l| !l.is_empty());
     let mut out = Vec::new();
     let mut image = None;
+    let mut thai_fonts = Vec::new();
     if w > 1.0 && h > 1.0 {
         let pad = (h * 0.06).clamp(1.0, 6.0);
         let (left_w, right_x) = match (&opts.graphic, a.name) {
@@ -2010,21 +2015,37 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
             image = im;
         }
         out.extend_from_slice(b"BT\n0 g\n");
+        // Lines at one size: Helvetica, with Thai shaped as Type 3 glyphs.
+        let mut draw = |doc: &mut Document, placed: &[(String, f64, f64)], size: f64, prefix: &str| -> Result<(), SignError> {
+            if placed.iter().any(|(l, ..)| pdfcraft_fonts::thai_text::has_thai(l)) {
+                let drawn = pdfcraft_fonts::thai_text::draw(doc, placed, size, false, false, "Helv", &helvetica_width, prefix)
+                    .map_err(|_| SignError::Unsupported("the Thai in the visible signature couldn't be drawn".into()))?;
+                out.extend(&drawn.ops);
+                thai_fonts.extend(drawn.fonts);
+            } else {
+                for (l, x, y) in placed {
+                    out.extend(format!("/Helv {} Tf 1 0 0 1 {} {} Tm ", fmt(size), fmt(*x), fmt(*y)).bytes());
+                    out.extend(literal(&win_ansi(l)));
+                    out.extend_from_slice(b" Tj\n");
+                }
+            }
+            Ok(())
+        };
         if a.name && opts.graphic.is_none() {
             // The name fills the left half.
             let mut size = (h * 0.4).min(36.0);
             let fit = (left_w - 2.0 * pad).max(1.0);
-            let longest = helvetica_width(name, 1.0).max(0.01);
+            let longest = measure(name, 1.0).max(0.01);
             size = size.min(fit / longest).max(4.0);
             let words = wrap(name, size, fit);
             let total = words.len() as f64 * size * 1.1;
             let mut y = (h + total) / 2.0 - size * 0.85;
-            for l in &words {
-                out.extend(format!("/Helv {} Tf 1 0 0 1 {} {} Tm ", fmt(size), fmt(pad), fmt(y)).bytes());
-                out.extend(literal(&win_ansi(l)));
-                out.extend_from_slice(b" Tj\n");
+            let mut placed = Vec::new();
+            for l in words {
+                placed.push((l, pad, y));
                 y -= size * 1.1;
             }
+            draw(doc, &placed, size, "PCThN")?;
         }
         // The details, shrunk to fit the right side.
         let mut size = (h / (lines.len().max(1) as f64 * 1.15)).min(12.0);
@@ -2036,12 +2057,12 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
             size *= 0.9;
         };
         let mut y = h - pad - size * 0.9;
-        for l in &wrapped {
-            out.extend(format!("/Helv {} Tf 1 0 0 1 {} {} Tm ", fmt(size), fmt(right_x), fmt(y)).bytes());
-            out.extend(literal(&win_ansi(l)));
-            out.extend_from_slice(b" Tj\n");
+        let mut placed = Vec::new();
+        for l in wrapped {
+            placed.push((l, right_x, y));
             y -= size * 1.15;
         }
+        draw(doc, &placed, size, "PCThD")?;
         out.extend_from_slice(b"ET\n");
     }
     let mut d = Dict::new();
@@ -2055,6 +2076,9 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
     font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
     let mut fonts = Dict::new();
     fonts.set(b"Helv".to_vec(), Object::Dict(font));
+    for (name, font) in thai_fonts {
+        fonts.set(name.into_bytes(), Object::Ref(font));
+    }
     let mut res = Dict::new();
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     if let Some(im) = image {

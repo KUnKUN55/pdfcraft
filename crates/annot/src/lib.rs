@@ -1314,7 +1314,9 @@ fn redraw_or_restore(doc: &mut Document, r: ObjRef, before: Dict) -> Result<(), 
 fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
     let d = annot_dict(doc, r);
     let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
-    let Some(stream) = build_appearance(doc, &d) else { return Err(AnnotError::Unsupported(subtype)) };
+    // Thai is drawn as Type 3 glyphs written into the document (Thai edition).
+    let stream = if appearance::draws_thai(&d) { appearance::build_with(&d, &mut Some(doc)) } else { build_appearance(doc, &d) };
+    let Some(stream) = stream else { return Err(AnnotError::Unsupported(subtype)) };
     apply_appearance(doc, r, &d, stream)
 }
 
