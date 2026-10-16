@@ -184,6 +184,10 @@
       <Component Id="PdfcraftNotice">
         <File Id="PdfcraftNoticeFile" Source="$(var.BinDir)\NOTICE" KeyPath="yes" />
       </Component>
+      <!-- The licences of the fonts built into the binaries. -->
+      <Component Id="PdfcraftFontLicenses">
+        <File Id="PdfcraftFontLicensesFile" Source="$(var.BinDir)\FONT-LICENSES.txt" KeyPath="yes" />
+      </Component>
     </ComponentGroup>
 
     <!-- OCR models (#103), with their licences and ATTRIBUTION.txt, in models\ beside pdfcraft.exe

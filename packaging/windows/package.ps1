@@ -93,6 +93,23 @@ foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE') {
   Copy-Item (Join-Path $Root $f) $Stage
 }
 Copy-Item (Join-Path $Root 'assets\app-icon\LICENSE-document.txt') $Stage
+# The fonts built into the binaries travel with their licences in both distributions (the MSI too):
+# assets\fonts\OFL-*.txt, and each craft-fonts family's OFL.txt or LICENSE.txt, in one file.
+$fontLicences = New-Object System.Text.StringBuilder
+$addLicence = {
+  param([string] $Title, [string] $Path)
+  [void] $fontLicences.Append("==== $Title ====`n`n").Append(([IO.File]::ReadAllText($Path) -replace "`r`n", "`n").TrimEnd()).Append("`n`n")
+}
+Get-ChildItem (Join-Path $Root 'assets\fonts\OFL-*.txt') | Sort-Object Name | ForEach-Object { & $addLicence ($_.BaseName -replace '^OFL-', '') $_.FullName }
+if ($env:CRAFT_FONTS_DIR) {
+  Get-ChildItem -Path (Join-Path $env:CRAFT_FONTS_DIR 'fonts') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+    foreach ($name in 'LICENSE.txt', 'OFL.txt') {
+      $l = Join-Path $_.FullName $name
+      if (Test-Path $l) { & $addLicence "$($_.Name) ($name)" $l }
+    }
+  }
+}
+[IO.File]::WriteAllText((Join-Path $Stage 'FONT-LICENSES.txt'), $fontLicences.ToString(), (New-Object System.Text.UTF8Encoding $false))
 
 & (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'pdfcraft.exe') (Join-Path $Stage 'pdfcraft-cli.exe')
 
@@ -128,7 +145,7 @@ $Portable = Join-Path $TargetDir "windows-package\pdfcraft-$Version-windows-$Arc
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
-foreach ($f in 'NOTICE', 'LICENSE-document.txt') {
+foreach ($f in 'NOTICE', 'LICENSE-document.txt', 'FONT-LICENSES.txt') {
   Copy-Item (Join-Path $Stage $f) $Portable
 }
 Copy-Item -Recurse $Models (Join-Path $Portable 'models')
@@ -142,6 +159,9 @@ if ($env:CRAFT_FONTS_DIR) {
   Get-ChildItem -Path (Join-Path $env:CRAFT_FONTS_DIR 'fonts') -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $ofl = Join-Path $_.FullName 'OFL.txt'
     if (Test-Path $ofl) { Copy-Item $ofl (Join-Path $Portable "OFL-$($_.Name).txt") }
+    # A family under another licence (TH Sarabun PSK: GPL-2.0-or-later with the font exception).
+    $other = Join-Path $_.FullName 'LICENSE.txt'
+    if (Test-Path $other) { Copy-Item $other (Join-Path $Portable "LICENSE-$($_.Name).txt") }
   }
 }
 # portable.txt beside pdfcraft.exe switches on portable mode: settings, logs, recovery files and new

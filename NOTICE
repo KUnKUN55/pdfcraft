@@ -29,6 +29,13 @@ list (author, source, license) is in ATTRIBUTION.md.
   pinned in .github/workflows/ also include Noto Sans Thai (in the web build too), Copyright 2022
   The Noto Project Authors (https://github.com/notofonts/thai), under SIL OFL 1.1; its licence is
   fonts/noto-sans-thai/OFL.txt in the craft-fonts build input.
+- TH Sarabun PSK typeface (thai/fonts/th-sarabun-psk/*.ttf; Thai edition), Copyright (c) 2010-2011
+  Software Industry Promotion Agency (Public Organization) (SIPA), created by Suppakit Chalermlarp.
+  Distributed unmodified under the licence its font files declare: the GNU General Public License,
+  version 2 or later, with the font embedding exception (PDFs that use it are not covered by the
+  GPL). See thai/fonts/th-sarabun-psk/LICENSE.txt, packaged in FONT-LICENSES.txt (and, in the
+  portable zip, LICENSE-th-sarabun-psk.txt) beside the Windows executables. The font files are
+  available unmodified in this repository at thai/fonts/th-sarabun-psk/.
 - hayro (rendering, via crates.io) — Apache-2.0 OR MIT. Its `embed-fonts` feature bundles the Foxit
   standard-14 Type 1 fonts under BSD-3-Clause ("Copyright 2014 PDFium Authors"), and hayro-cmap bundles
   Adobe CMap resources under BSD-3-Clause.

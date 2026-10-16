@@ -14,7 +14,7 @@ application, with full Thai support:
 Downloads for Windows are on the [Releases](../../releases) page. To build it yourself, run
 `thai\build-windows.ps1` (see [README-TH.md](README-TH.md)).
 
-This edition is based on PdfCraft by the ArtCraft team (upstream release v0.7.1). It is not made,
+This edition is based on PdfCraft by the ArtCraft team (upstream release v0.8.0). It is not made,
 endorsed or supported by the ArtCraft team. Please report problems with it here, not upstream.
 As the ArtCraft brand terms require of modified versions, the ArtCraft logos have been removed from
 this repository and from the program.
@@ -26,5 +26,9 @@ PdfCraft is licensed under the MIT License or the Apache License, Version 2.0, a
 [NOTICE](NOTICE). The changes in this edition, including the Thai translation, are offered under
 the same terms. Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 
-TH Sarabun PSK is licensed under the SIL Open Font License 1.1
-([thai/fonts/th-sarabun-psk/OFL.txt](thai/fonts/th-sarabun-psk/OFL.txt)).
+TH Sarabun PSK (Copyright (c) 2010-2011 SIPA) is distributed unmodified under the licence its font
+files declare: the GNU General Public License, version 2 or later, with the font embedding
+exception, so PDFs that use it are not covered by the GPL
+([thai/fonts/th-sarabun-psk/LICENSE.txt](thai/fonts/th-sarabun-psk/LICENSE.txt)). The copy it was
+taken from is published with the SIL Open Font License 1.1, kept as
+[OFL.txt](thai/fonts/th-sarabun-psk/OFL.txt).
