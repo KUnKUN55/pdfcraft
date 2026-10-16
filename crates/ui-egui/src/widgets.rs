@@ -13,9 +13,43 @@ const FIELD_MIN_HEIGHT: f32 = 30.0;
 const DIALOG_PAD_X: i8 = 20;
 const DIALOG_PAD_Y: i8 = 16;
 
-/// How far below the pointer's tip a tooltip opens: past the arrow cursor, which hangs down from
-/// it, so the cursor never covers the text.
-const POINTER_CLEARANCE: f32 = 24.0;
+/// The mouse cursor's size in physical pixels where the system doesn't say (Windows' default).
+const DEFAULT_CURSOR_PX: u32 = 32;
+
+/// The system mouse cursor's size in physical pixels: Windows' Settings ▸ Accessibility ▸ Mouse
+/// pointer ▸ Size, read once (a size changed while the app runs is seen after a restart).
+fn cursor_px() -> u32 {
+    static SIZE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SIZE.get_or_init(|| system_cursor_px().filter(|px| (16..=512).contains(px)).unwrap_or(DEFAULT_CURSOR_PX))
+}
+
+/// `HKCU\Control Panel\Cursors\CursorBaseSize`; `None` when missing or not a number.
+#[cfg(target_os = "windows")]
+fn system_cursor_px() -> Option<u32> {
+    use winsafe::{HKEY, RegistryValue, co::RRF};
+    match HKEY::CURRENT_USER.RegGetValue(Some("Control Panel\\Cursors"), Some("CursorBaseSize"), RRF::RT_REG_DWORD).ok()? {
+        RegistryValue::Dword(v) => Some(v),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn system_cursor_px() -> Option<u32> {
+    None
+}
+
+/// How far below the pointer's tip a tooltip opens, in points: past the cursor, which hangs down
+/// from it (the hand over a clickable row nearly fills its cell), so the cursor never covers the
+/// text. 24 points for the default cursor at 150 %; more for an enlarged one.
+fn pointer_clearance(cursor_px: u32, pixels_per_point: f32) -> f32 {
+    let cell = cursor_px as f32 / pixels_per_point.max(0.5);
+    (cell * 0.9 + 4.0).clamp(16.0, 200.0)
+}
+
+/// How far right of the pointer's tip the cursor reaches, in points (for tooltips beside it).
+pub(crate) fn pointer_reach(ctx: &egui::Context) -> f32 {
+    cursor_px() as f32 / ctx.pixels_per_point().max(0.5) * 0.75
+}
 
 /// Hover tooltips that open below the pointer, clear of the cursor (Thai edition). egui opens them
 /// just under the widget, where the pointer resting on a row or button covers their first line.
@@ -41,7 +75,8 @@ impl Tip for Response {
 fn show_tip(mut tip: egui::Tooltip<'_>, resp: &Response, text: egui::WidgetText) {
     // Without a pointer (keyboard focus) egui's place under the widget is right.
     if let Some(pointer) = resp.ctx.pointer_hover_pos() {
-        tip.popup = tip.popup.at_position(pointer).align(egui::RectAlign::BOTTOM_START).gap(POINTER_CLEARANCE);
+        let gap = pointer_clearance(cursor_px(), resp.ctx.pixels_per_point());
+        tip.popup = tip.popup.at_position(pointer).align(egui::RectAlign::BOTTOM_START).gap(gap);
     }
     tip.show(|ui| {
         // As on_hover_text: keep egui's auto-sizing from shrinking the tooltip.
@@ -609,6 +644,19 @@ pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> R
 mod tests {
     use super::*;
     use egui::Pos2;
+
+    /// Thai edition: tooltips clear the cursor at its real size (an enlarged pointer covered them).
+    #[test]
+    fn tooltip_clearance_follows_the_cursor_size() {
+        // Windows' default cursor at 150 %: as before.
+        assert!((pointer_clearance(32, 1.5) - 23.2).abs() < 0.1);
+        // Enlarged to 80 px (Settings ▸ Mouse pointer ▸ Size): past the whole cursor cell.
+        let big = pointer_clearance(80, 1.5);
+        assert!(big >= 80.0 / 1.5 * 0.85, "{big}");
+        // Never zero, never absurd, whatever the inputs.
+        assert_eq!(pointer_clearance(0, 1.0), 16.0);
+        assert_eq!(pointer_clearance(u32::MAX, 0.0), 200.0);
+    }
 
     #[test]
     fn search_placeholder_never_overlaps_the_shortcut() {

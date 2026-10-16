@@ -49,7 +49,9 @@ pub fn rail_button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool,
 /// A hover tooltip beside `resp`, vertically centred on it (a vertical tool rail's).
 pub fn rail_tip(resp: Response, text: &str) -> Response {
     let mut tip = egui::Tooltip::for_enabled(&resp);
-    tip.popup = tip.popup.align(egui::RectAlign::RIGHT).gap(8.0);
+    // Past the cursor too, which reaches right of the pointer (far, for an enlarged one).
+    let reach = resp.ctx.pointer_hover_pos().map_or(0.0, |p| p.x + crate::widgets::pointer_reach(&resp.ctx) - resp.rect.right());
+    tip.popup = tip.popup.align(egui::RectAlign::RIGHT).gap(reach.max(8.0));
     tip.show(|ui| {
         ui.set_max_width(ui.spacing().tooltip_width);
         ui.add(egui::Label::new(text));
