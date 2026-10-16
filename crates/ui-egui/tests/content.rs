@@ -435,3 +435,23 @@ fn text_boxes_copy_paste_and_ctrl_drag() {
     drag_with(&mut h, grab, grab + egui::vec2(60.0, 0.0), egui::Modifiers::NONE);
     assert_eq!(added(&h).len(), 4, "a plain drag moves, it doesn't copy");
 }
+
+/// Thai edition: ⌘Enter finishes the text being added, as Done does (and as it applies an edit
+/// in Edit text), without a new line in it.
+#[test]
+fn command_enter_finishes_added_text_like_done() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let p = at(&h, 40.0, 300.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Hello".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(3);
+    let items = added(&h);
+    assert_eq!(items.len(), 1, "the text is added");
+    assert_eq!(text_of(&items[0]).0, "Hello", "without a new line");
+    assert!(h.state().views[0].content.draft.is_none(), "the editor closed");
+    assert_eq!(h.state().quick_tool, QuickTool::Select, "back to Select, as after Done");
+}
