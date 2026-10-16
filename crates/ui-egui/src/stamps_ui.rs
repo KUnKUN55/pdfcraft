@@ -1,6 +1,7 @@
 //! Custom stamps (Add a stamp ▸ Custom stamps ▸ Create): a PDF page or an image saved in the
 //! user's stamp library under a category and a name, then placed like any stamp.
 
+use crate::widgets::Tip as _;
 use std::sync::Arc;
 
 use egui::{Align, Layout};
@@ -123,7 +124,7 @@ pub(crate) fn palette_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Toke
         app.quick_tool = QuickTool::Select;
     }
     ui.add_space(4.0);
-    if widgets::pill_button(ui, tl!("Create custom stamp…"), false).on_hover_text(tl!("From a PDF page or an image")).clicked() {
+    if widgets::pill_button(ui, tl!("Create custom stamp…"), false).tip(tl!("From a PDF page or an image")).clicked() {
         app.pick_stamp_file();
     }
 }

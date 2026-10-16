@@ -6,6 +6,7 @@
 //! listed on a worker thread and at most every few seconds while Home shows, so a slow, huge or
 //! offline synced folder never blocks the frame.
 
+use crate::widgets::Tip as _;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
@@ -314,14 +315,14 @@ pub(crate) fn section(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let (icon, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
             icons::paint(ui, icon, "folder", 20.0, t.icon);
-            ui.label(egui::RichText::new(crate::bidi::visual(&name)).font(theme::semibold(14.0))).on_hover_text(folder);
+            ui.label(egui::RichText::new(crate::bidi::visual(&name)).font(theme::semibold(14.0))).tip(folder);
             ui.add_space(4.0);
             // Leave room for Unpin: a long location is cut short, never the button.
             let room = (ui.available_width() - 110.0).max(0.0);
             ui.scope(|ui| {
                 ui.set_max_width(room);
                 let place = egui::RichText::new(crate::bidi::visual(&location(folder))).font(theme::regular(12.0)).color(t.text_faint);
-                ui.add(egui::Label::new(place).truncate()).on_hover_text(folder);
+                ui.add(egui::Label::new(place).truncate()).tip(folder);
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let resp = widgets::ghost_button(ui, "x", tl!("Unpin"));
@@ -370,7 +371,7 @@ pub(crate) fn section(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             let detail = ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, detail, theme::regular(12.0), t.text_muted);
             let width = detail.left() - 16.0 - (rect.left() + 62.0);
             widgets::row_text(ui, rect.min + vec2(62.0, 19.0), crate::bidi::visual(&f.name), theme::medium(13.0), t.text, width);
-            if resp.on_hover_text(&f.path).clicked() {
+            if resp.tip(&f.path).clicked() {
                 open = Some(f.path.clone());
             }
         }

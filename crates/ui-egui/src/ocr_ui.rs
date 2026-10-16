@@ -2,6 +2,7 @@
 //! and the background run with its progress. Recognition happens on a worker thread; the result
 //! is applied as one undoable edit when it is done.
 
+use crate::widgets::Tip as _;
 use std::sync::{Arc, Mutex};
 
 use egui::{Align, Layout};
@@ -108,7 +109,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
             egui::ComboBox::from_id_salt("ocr-output").selected_text(tl!("Searchable Image (Exact)")).width(220.0).show_ui(ui, |ui| {
                 let _ = ui
                     .selectable_label(true, tl!("Searchable Image (Exact)"))
-                    .on_hover_text(tl!("Adds invisible text over each word; the page image is not changed"));
+                    .tip(tl!("Adds invisible text over each word; the page image is not changed"));
             });
             ui.end_row();
             ui.label(tl!("Downsample to"));
@@ -121,7 +122,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
         });
         ui.add_space(4.0);
         ui.add(crate::widgets::checkbox(&mut d.text_pages, tl!("Also recognize pages that already have text")))
-            .on_hover_text(tl!("Pictures on those pages are recognized too; words already in the page's text are not added again"));
+            .tip(tl!("Pictures on those pages are recognized too; words already in the page's text are not added again"));
     });
     if !available {
         ui.label(

@@ -3,6 +3,7 @@
 //! (images keep their proportions), double-click text to retype it, format it from the panel,
 //! Delete to remove it. Each change is one undoable engine edit.
 
+use crate::widgets::Tip as _;
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke};
 use pdfcraft_engine::{Added, AddedContent, AddedText, Edit, FontFamily, TextAlign};
 use pdfcraft_render::DocInfo;
@@ -810,10 +811,10 @@ pub(crate) fn format_panel_with(ui: &mut egui::Ui, t: &Tokens, style: &AddedText
         size_control(ui, &mut s.size);
     });
     ui.horizontal(|ui| {
-        if ui.selectable_label(s.bold, egui::RichText::new("B").strong()).on_hover_text(tl!("Bold")).clicked() {
+        if ui.selectable_label(s.bold, egui::RichText::new("B").strong()).tip(tl!("Bold")).clicked() {
             s.bold = !s.bold;
         }
-        if ui.selectable_label(s.italic, egui::RichText::new("I").italics()).on_hover_text(tl!("Italic")).clicked() {
+        if ui.selectable_label(s.italic, egui::RichText::new("I").italics()).tip(tl!("Italic")).clicked() {
             s.italic = !s.italic;
         }
         ui.separator();

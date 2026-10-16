@@ -4,6 +4,7 @@
 //! cancels, Tab moves to the next field). Check boxes and radio buttons toggle on click. Combo
 //! and list boxes open a list of their options. Every change is one undoable engine edit.
 
+use crate::widgets::Tip as _;
 use std::collections::HashSet;
 
 use egui::{Color32, CornerRadius, Rect, Stroke, vec2};
@@ -192,7 +193,7 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.small_button("‹").on_hover_text(tl!("Previous month")).clicked() {
+                    if ui.small_button("‹").tip(tl!("Previous month")).clicked() {
                         (y, m) = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
                     }
                     ui.label(
@@ -202,7 +203,7 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
                         ))
                         .strong(),
                     );
-                    if ui.small_button("›").on_hover_text(tl!("Next month")).clicked() {
+                    if ui.small_button("›").tip(tl!("Next month")).clicked() {
                         (y, m) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
                     }
                 });
@@ -232,7 +233,7 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
                             }
                             if ui
                                 .selectable_label(selected, text)
-                                .on_hover_text(crate::i18n::fmt(
+                                .tip(crate::i18n::fmt(
                                     tl!("{month} {day}, {y}"),
                                     &[
                                         ("month", tl_ctx!("calendar date", MONTHS[(m - 1) as usize])),

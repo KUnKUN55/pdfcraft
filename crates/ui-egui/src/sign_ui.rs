@@ -2,6 +2,7 @@
 //! click an empty signature field), the Sign with a Digital ID / Configure New Digital ID /
 //! Sign as dialogs, the Signatures panel, and the signature message bar.
 
+use crate::widgets::Tip as _;
 use std::path::PathBuf;
 
 use egui::{Align, Color32, CornerRadius, Layout, Pos2, Rect, Stroke, vec2};
@@ -639,7 +640,7 @@ fn choose(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
             let elided = name.elided || details.elided;
             ui.painter().galley(rect.min + vec2(40.0, 9.0), name, name_color);
             ui.painter().galley(rect.min + vec2(40.0, 28.0), details, t.text_muted);
-            let resp = if elided { resp.on_hover_text(format!("{}\n{sub}", e.name)) } else { resp };
+            let resp = if elided { resp.tip(format!("{}\n{sub}", e.name)) } else { resp };
             if !usable {
                 continue;
             }

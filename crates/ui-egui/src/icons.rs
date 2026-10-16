@@ -36,7 +36,7 @@ pub fn paint(ui: &egui::Ui, rect: Rect, name: &str, size: f32, tint: Color32) {
 /// Square icon button: transparent until hovered; `selected` gets the accent treatment.
 pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
     let resp = bare_button(ui, name, box_size, selected, tooltip);
-    if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
+    if tooltip.is_empty() { resp } else { crate::widgets::Tip::tip(resp, tooltip) }
 }
 
 /// [`button`] for a vertical tool rail: the tooltip opens to the right of the button, where the

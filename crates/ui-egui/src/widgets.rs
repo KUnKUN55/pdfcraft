@@ -13,6 +13,43 @@ const FIELD_MIN_HEIGHT: f32 = 30.0;
 const DIALOG_PAD_X: i8 = 20;
 const DIALOG_PAD_Y: i8 = 16;
 
+/// How far below the pointer's tip a tooltip opens: past the arrow cursor, which hangs down from
+/// it, so the cursor never covers the text.
+const POINTER_CLEARANCE: f32 = 24.0;
+
+/// Hover tooltips that open below the pointer, clear of the cursor (Thai edition). egui opens them
+/// just under the widget, where the pointer resting on a row or button covers their first line.
+pub(crate) trait Tip {
+    /// [`Response::on_hover_text`], clear of the pointer.
+    fn tip(self, text: impl Into<egui::WidgetText>) -> Self;
+    /// [`Response::on_disabled_hover_text`], clear of the pointer.
+    fn disabled_tip(self, text: impl Into<egui::WidgetText>) -> Self;
+}
+
+impl Tip for Response {
+    fn tip(self, text: impl Into<egui::WidgetText>) -> Self {
+        show_tip(egui::Tooltip::for_enabled(&self), &self, text.into());
+        self
+    }
+
+    fn disabled_tip(self, text: impl Into<egui::WidgetText>) -> Self {
+        show_tip(egui::Tooltip::for_disabled(&self), &self, text.into());
+        self
+    }
+}
+
+fn show_tip(mut tip: egui::Tooltip<'_>, resp: &Response, text: egui::WidgetText) {
+    // Without a pointer (keyboard focus) egui's place under the widget is right.
+    if let Some(pointer) = resp.ctx.pointer_hover_pos() {
+        tip.popup = tip.popup.at_position(pointer).align(egui::RectAlign::BOTTOM_START).gap(POINTER_CLEARANCE);
+    }
+    tip.show(|ui| {
+        // As on_hover_text: keep egui's auto-sizing from shrinking the tooltip.
+        ui.set_max_width(ui.spacing().tooltip_width);
+        ui.add(egui::Label::new(text));
+    });
+}
+
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     let t = Tokens::get(ctx);
     egui::Frame::new()
@@ -191,7 +228,7 @@ pub fn search_box(ui: &mut egui::Ui, placeholder: &str, width: f32) -> Response 
     ui.painter().with_clip_rect(text_rect).galley(egui::pos2(text_left, rect.center().y - text.size().y * 0.5), text, t.text_faint);
     ui.painter().with_clip_rect(rect).galley(shortcut_pos, shortcut, t.text_faint);
     let resp = resp.on_hover_cursor(egui::CursorIcon::Text);
-    if elided { resp.on_hover_text(placeholder) } else { resp }
+    if elided { resp.tip(placeholder) } else { resp }
 }
 
 pub fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> Response {
@@ -507,7 +544,7 @@ pub fn community_links(ui: &mut egui::Ui) -> Option<&'static str> {
         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
         for (i, l) in pdfcraft_engine::links::LINKS.iter().enumerate() {
             let resp = if i == 0 { icon_pill(ui, l.icon, tl!("Join our Discord"), true) } else { icon_pill(ui, l.icon, tl!(l.label), false) };
-            if resp.on_hover_text(l.url).clicked() {
+            if resp.tip(l.url).clicked() {
                 clicked = Some(l.command);
             }
         }
@@ -545,7 +582,7 @@ pub fn split_pill(ui: &mut egui::Ui, icon: &str, label: &str, more: &str) -> (Re
     crate::icons::paint(ui, Rect::from_min_size(body.min + vec2(12.0, 7.0), vec2(16.0, 16.0)), icon, 15.0, t.text);
     ui.painter().text(body.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, label, font, t.text);
     crate::icons::paint(ui, Rect::from_center_size(more_body.center(), vec2(14.0, 14.0)), "chevron-down", 13.0, t.text);
-    (theme::hand(main).on_hover_text(label), theme::hand(arrow).on_hover_text(more))
+    (theme::hand(main).tip(label), theme::hand(arrow).tip(more))
 }
 
 /// A pill button with an icon (primary = filled accent).

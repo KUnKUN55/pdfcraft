@@ -4,6 +4,7 @@
 //! Page images come from the engine's render pool as whole-page rasters at the current zoom;
 //! stale rasters are shown stretched until the sharp one arrives (tiling comes in M3.3).
 
+use crate::widgets::Tip as _;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
@@ -4162,12 +4163,12 @@ fn organize_toolbar(view: &mut DocView, info: &DocInfo, editable: bool, dirty: b
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::ghost_button(ui, "x", tl!("Close")).on_hover_text(tl!("Back to the document")).clicked() {
+                if widgets::ghost_button(ui, "x", tl!("Close")).tip(tl!("Back to the document")).clicked() {
                     view.organize = false;
                 }
                 // What the grid shows is what is saved.
                 let save = ui.add_enabled_ui(dirty, |ui| widgets::pill_button(ui, tl!("Save pages"), true)).inner;
-                if save.on_hover_text(tl!("Save these pages as one PDF")).on_disabled_hover_text(tl!("No changes to save")).clicked() {
+                if save.tip(tl!("Save these pages as one PDF")).disabled_tip(tl!("No changes to save")).clicked() {
                     view.pending_action = Some(ViewAction::Save);
                 }
                 ui.add_space(8.0);
@@ -4184,7 +4185,7 @@ fn organize_toolbar(view: &mut DocView, info: &DocInfo, editable: bool, dirty: b
                     .frame(false);
                 let percent = ui.add_sized([44.0, 30.0], percent);
                 percent.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Reset page size")));
-                if percent.on_hover_text(tl!("Reset page size")).clicked() {
+                if percent.tip(tl!("Reset page size")).clicked() {
                     view.grid_zoom_request = Some(1.0);
                 }
                 if ui
@@ -4247,7 +4248,7 @@ fn gap_button(ui: &mut egui::Ui, gap: usize, at: Pos2, height: f32, label: Strin
     let ink = Stroke::new(1.5, if hot { Color32::WHITE } else { t.text_muted });
     ui.painter().line_segment([at - vec2(4.0, 0.0), at + vec2(4.0, 0.0)], ink);
     ui.painter().line_segment([at - vec2(0.0, 4.0), at + vec2(0.0, 4.0)], ink);
-    resp.on_hover_text(label).clicked()
+    resp.tip(label).clicked()
 }
 
 fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool, unobstructed: bool, ui: &mut egui::Ui, t: &Tokens) {
@@ -4367,7 +4368,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 let check = ui.push_id(("org-check", i), |ui| ui.put(check_rect, widgets::checkbox_without_text(&mut checked))).inner;
                 let label = crate::i18n::fmt(tl!("Select page {label}"), &[("label", &p.label)]);
                 check.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, checked, label.clone()));
-                if check.on_hover_text(label).changed() {
+                if check.tip(label).changed() {
                     view.click_page(i, egui::Modifiers::COMMAND, false);
                     view.current = i;
                 }

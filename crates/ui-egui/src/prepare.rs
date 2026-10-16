@@ -5,6 +5,7 @@
 //! While the Prepare a form panel is open the page shows every field with a light-blue fill and
 //! its name; clicks select fields instead of filling them in, as in Acrobat.
 
+use crate::widgets::Tip as _;
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, DATE_PRESETS, Format, TIME_PRESETS, Validate, format_value};
 use pdfcraft_engine::{BorderStyle, Edit, FieldFont, FieldLook, FieldProps, FormField, FormFieldKind, NewField};
@@ -1167,7 +1168,7 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                             ui.horizontal(|ui| {
                                 ui.label(o);
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button(tl!("Delete")).on_hover_text(crate::i18n::fmt(tl!("Delete {o}"), &[("o", o)])).clicked() {
+                                    if ui.small_button(tl!("Delete")).tip(crate::i18n::fmt(tl!("Delete {o}"), &[("o", o)])).clicked() {
                                         remove = Some(i);
                                     }
                                     if i > 0 && ui.small_button(tl!("Up")).clicked() {

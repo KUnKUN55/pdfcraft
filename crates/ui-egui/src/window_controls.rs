@@ -8,6 +8,7 @@
 //! Sway, Hyprland, X11) keep their own frame and never get here.
 
 use crate::theme::Tokens;
+use crate::widgets::Tip as _;
 use egui::viewport::ResizeDirection;
 use egui::{Align2, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -97,7 +98,7 @@ pub fn buttons(ui: &mut egui::Ui, buttons: &[Button]) {
         };
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(BUTTON), Sense::click());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-        let response = response.on_hover_text(label);
+        let response = response.tip(label);
         if ui.is_rect_visible(rect) {
             paint(ui.painter(), rect, button, maximized, &t, &response);
         }

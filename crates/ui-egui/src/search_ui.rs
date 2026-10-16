@@ -1,6 +1,7 @@
 //! Edit ▸ Advanced Search (⇧⌘F): the search in a side panel that lists every match with its
 //! context, page by page; click a result to go to it. It shares the find bar's search.
 
+use crate::widgets::Tip as _;
 use egui::text::LayoutJob;
 use egui::{Color32, FontId, TextFormat};
 
@@ -88,7 +89,7 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: us
         job.append(&format!(" {}…", flat(after)), 0.0, plain);
         job.wrap.max_width = ui.available_width();
         let selected = find.current == Some(i);
-        let resp = ui.add(egui::Button::selectable(selected, job).wrap()).on_hover_text(tl!("Go to this result"));
+        let resp = ui.add(egui::Button::selectable(selected, job).wrap()).tip(tl!("Go to this result"));
         if resp.clicked() {
             go = Some(i);
         }

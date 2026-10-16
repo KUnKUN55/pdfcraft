@@ -3,6 +3,7 @@
 //! (Size, Poster, Multiple, Booklet); orientation; comments & forms; and a live preview of the
 //! sheets. Printing sends the print-ready PDF to the system spooler; "Save as PDF" writes it.
 
+use crate::widgets::Tip as _;
 use egui::{Color32, Pos2, Rect, Stroke, pos2, vec2};
 use pdfcraft_engine::print::{self, Binding, BookletSubset, Content, Layout, Orientation, PAPERS, PageOrder, SizeMode, Subset, spool};
 
@@ -685,7 +686,7 @@ pub(crate) fn body(
                     } else {
                         tl!("The printer driver's own settings for this print: paper tray, paper type, finishing and more.")
                     };
-                    let properties = ui.add_enabled(d.printer.is_some() && !browser, egui::Button::new(tl!("Properties…"))).on_hover_text(tip);
+                    let properties = ui.add_enabled(d.printer.is_some() && !browser, egui::Button::new(tl!("Properties…"))).tip(tip);
                     if properties.clicked()
                         && let Some(p) = d.printer.clone()
                     {
@@ -983,7 +984,7 @@ pub(crate) fn body(
             }
             ui.horizontal(|ui| {
                 let n = sheets.len();
-                if ui.add_enabled(d.sheet > 0, egui::Button::new("‹")).on_hover_text(tl!("Previous sheet")).clicked() {
+                if ui.add_enabled(d.sheet > 0, egui::Button::new("‹")).tip(tl!("Previous sheet")).clicked() {
                     d.sheet -= 1;
                 }
                 ui.label(if n == 0 {
@@ -991,7 +992,7 @@ pub(crate) fn body(
                 } else {
                     crate::i18n::fmt(tl!("Sheet {s} of {n}"), &[("s", &(d.sheet + 1).to_string()), ("n", &n.to_string())])
                 });
-                if ui.add_enabled(d.sheet + 1 < n, egui::Button::new("›")).on_hover_text(tl!("Next sheet")).clicked() {
+                if ui.add_enabled(d.sheet + 1 < n, egui::Button::new("›")).tip(tl!("Next sheet")).clicked() {
                     d.sheet += 1;
                 }
             });

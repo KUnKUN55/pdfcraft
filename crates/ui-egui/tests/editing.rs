@@ -4266,3 +4266,23 @@ fn quick_bar_tooltips_open_beside_the_button() {
     assert!(tip.left() >= button.right(), "the tooltip {tip:?} opens to the right of the button {button:?}");
     assert!(!tip.contains(button.center()), "the pointer doesn't cover the tooltip");
 }
+
+/// Thai edition: a tooltip opens below the pointer, clear of the arrow cursor hanging from its
+/// tip (egui opened it right under the row, where the cursor covered its text).
+#[test]
+fn tooltips_open_below_the_pointer() {
+    let mut h = harness(1, |app| {
+        app.left = pdfcraft_ui_egui::LeftPanel::Tool("edit");
+        app.left_open = true;
+    });
+    h.run_steps(4);
+    let row = h.get_all_by_label("Text").next().expect("the Text tool row").rect();
+    // Near the row's lower edge, where the cursor hung over a tooltip opened under the row.
+    let at = egui::pos2(row.center().x, row.bottom() - 3.0);
+    h.hover_at(at);
+    for _ in 0..8 {
+        h.run_steps(1);
+    }
+    let tip = h.query_all_by_label_contains("— edit.text").next().expect("the row's tooltip shows").rect();
+    assert!(tip.top() >= at.y + 20.0, "the tooltip {tip:?} opens below the pointer at {at:?}, past the cursor");
+}

@@ -4,6 +4,7 @@
 //! Menus, keyboard shortcuts, the palette, the tool panels and automation (`set_option`, and
 //! the control channel later) all call `PdfCraftApp::execute`.
 
+use crate::widgets::Tip as _;
 use pdfcraft_engine::Edit;
 use pdfcraft_engine::commands::{self, COMMANDS, CommandSpec, Shortcut};
 
@@ -736,7 +737,7 @@ pub(crate) fn registry_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, menu: &str
             let mut clear = false;
             ui.menu_button(label, |ui| {
                 for r in &app.recent {
-                    if ui.button(&r.name).on_hover_text(&r.path).clicked() {
+                    if ui.button(&r.name).tip(&r.path).clicked() {
                         open = Some(r.path.clone());
                         ui.close();
                     }

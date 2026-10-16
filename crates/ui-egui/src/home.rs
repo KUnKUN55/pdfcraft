@@ -1,6 +1,7 @@
 //! Home tab: recommended tools, open card, pinned folders and recent files (local only, never
 //! another app's list).
 
+use crate::widgets::Tip as _;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, vec2};
 use pdfcraft_engine::catalog;
 
@@ -89,7 +90,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 theme::medium(12.0),
                                 t.accent_text,
                             );
-                            let resp = if title_elided || blurb_elided { resp.on_hover_text(format!("{}\n{blurb}", tl!(g.label))) } else { resp };
+                            let resp = if title_elided || blurb_elided { resp.tip(format!("{}\n{blurb}", tl!(g.label))) } else { resp };
                             if theme::hand(resp).clicked() {
                                 app.select_tool(g.id);
                             }
@@ -128,7 +129,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let resp = widgets::ghost_button(ui, "trash-2", tl!("Clear"));
                         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Clear Recent Files")));
-                        clear = resp.on_hover_text(tl!("Clear Recent Files")).clicked();
+                        clear = resp.tip(tl!("Clear Recent Files")).clicked();
                     });
                 }
             });
@@ -160,7 +161,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         ui.painter().rect_filled(x_rect, CornerRadius::same(6), t.pressed);
                     }
                     icons::paint(ui, x_rect.shrink(6.0), "x", 16.0, t.icon);
-                    if x.on_hover_text(tl!("Remove from Recent")).clicked() {
+                    if x.tip(tl!("Remove from Recent")).clicked() {
                         remove = Some(r.path.clone());
                     }
                 }
@@ -184,7 +185,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 let width = detail.left() - 16.0 - (body.left() + 46.0);
                 widgets::row_text(ui, body.min + vec2(46.0, 15.0), crate::bidi::visual(&r.name), theme::medium(13.5), t.text, width);
                 widgets::row_text(ui, body.min + vec2(46.0, 32.0), crate::bidi::visual(&r.path), theme::regular(11.0), t.text_faint, width);
-                if theme::hand(resp).on_hover_text(&r.path).clicked() {
+                if theme::hand(resp).tip(&r.path).clicked() {
                     open = Some(r.path.clone());
                 }
             }

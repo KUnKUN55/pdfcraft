@@ -14,6 +14,7 @@
 //! watchdog: there, at most one thumbnail per frame, only one waits at a time (its pool holds the
 //! parsed document), and a very slow page still stalls that frame (as in the document view).
 
+use crate::widgets::Tip as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -1045,7 +1046,7 @@ impl Card {
             tip.push_str(tl!("Switch to List view to change the pages it takes."));
         }
         // (Over the bar, its buttons say what they do instead.)
-        let resp = if covered || over_bar { resp } else { resp.on_hover_text(tip) };
+        let resp = if covered || over_bar { resp } else { resp.tip(tip) };
 
         // The same actions on a right click, show large first (and Unlock… for a locked file).
         let at = resp.rect.left_bottom();

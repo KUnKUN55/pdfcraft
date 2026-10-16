@@ -2,6 +2,7 @@
 //! a photographed document; Enhance page straightens what they enclose
 //! (`Session::enhance_camera_page`, one undoable step).
 
+use crate::widgets::Tip as _;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Shape, Stroke, vec2};
 
 use crate::canvas::{DocView, PageXform, ViewAction};
@@ -184,7 +185,7 @@ pub(crate) fn bar(ctx: &egui::Context, view: &mut DocView, area: Rect, t: &Token
                                 let r = ui.add_enabled(allowed, egui::Button::image(crate::icons::image(name, 18.0, t.text)).frame(false));
                                 // Named for screen readers (and tests), not only on hover.
                                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, allowed, tip));
-                                r.on_hover_text(tip).clicked()
+                                r.tip(tip).clicked()
                             };
                             if icon(ui, "rotate-ccw", tl!("Rotate counterclockwise")) {
                                 view.pending_action = Some(ViewAction::CameraRotate { clockwise: false });

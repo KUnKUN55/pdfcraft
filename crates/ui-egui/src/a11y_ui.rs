@@ -2,6 +2,7 @@
 //! and the Accessibility Checker panel (results by category, with Fix, Skip rule, Explain,
 //! Check again and Show report on each rule).
 
+use crate::widgets::Tip as _;
 use std::collections::BTreeSet;
 
 use egui::{Align, Layout};
@@ -197,7 +198,7 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &mut A11yState, doc: D
             if widgets::pill_button(ui, tl!("Check again"), false).clicked() {
                 action = Some(PanelAction::CheckAgain);
             }
-            if widgets::pill_button(ui, tl!("Report"), false).on_hover_text(tl!("Show the accessibility report")).clicked() {
+            if widgets::pill_button(ui, tl!("Report"), false).tip(tl!("Show the accessibility report")).clicked() {
                 action = Some(PanelAction::ShowReport);
             }
         });
@@ -326,11 +327,11 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &mut A11yState, doc: D
                         let said = f.said(&crate::i18n::words);
                         let l = ui.add(egui::Label::new(egui::RichText::new(said).small().color(t.text_muted)).sense(egui::Sense::click()));
                         if let Some(object) = f.object {
-                            if l.on_hover_text(tl!("Tags")).clicked() {
+                            if l.tip(tl!("Tags")).clicked() {
                                 action = Some(PanelAction::GoToTag(object, f.page, f.bbox));
                             }
                         } else if let Some(p) = f.page
-                            && l.on_hover_text(tl!("Go to the page")).clicked()
+                            && l.tip(tl!("Go to the page")).clicked()
                         {
                             action = Some(PanelAction::GoTo(p, f.bbox));
                         }

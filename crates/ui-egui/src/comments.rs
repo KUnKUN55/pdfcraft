@@ -12,6 +12,7 @@
 //! Everything is turned into `pdfcraft_engine::Edit`s, queued on the view as `pending_edit` and
 //! applied by the app, so each change is one undo step.
 
+use crate::widgets::Tip as _;
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use pdfcraft_engine::{Edit, LineEnding, Markup, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, Style};
 use pdfcraft_render::{Annotation, DocInfo, PageInfo, PageText};
@@ -1519,7 +1520,7 @@ fn swatch(ui: &mut egui::Ui, c: Rgb, on: bool, tooltip: &str) -> egui::Response 
     if on || resp.hovered() {
         ui.painter().circle_stroke(r.center(), 11.0, Stroke::new(1.5, SELECT_BLUE));
     }
-    resp.on_hover_text(tooltip)
+    resp.tip(tooltip)
 }
 
 /// The "+" swatch that opens "Other colour…": a ring with a plus, the size of a swatch.
@@ -1536,7 +1537,7 @@ fn other_colour_swatch(ui: &mut egui::Ui, open: bool) -> egui::Response {
     }
     let label = tl!("Other colour…");
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, open, label));
-    resp.on_hover_text(label)
+    resp.tip(label)
 }
 
 /// A grid of colour swatches with a "+" swatch for "Other colour…" (a full picker, as Acrobat's

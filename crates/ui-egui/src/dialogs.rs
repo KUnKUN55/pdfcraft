@@ -1,5 +1,6 @@
 //! Modal dialogs: Document Properties, Keyboard Shortcuts, About (with the Contributors and Models credits).
 
+use crate::widgets::Tip as _;
 use egui::{Align, Layout};
 
 use crate::theme::{self, Tokens};
@@ -345,7 +346,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                                     for n in (1..ends.len()).rev().take(12) {
                                         if ui
                                             .small_button(crate::i18n::fmt(tl!("View revision {n}"), &[("n", &n.to_string())]))
-                                            .on_hover_text(tl!("Open the file as it was saved then"))
+                                            .tip(tl!("Open the file as it was saved then"))
                                             .clicked()
                                         {
                                             open_revision = Some(n);
@@ -1400,7 +1401,7 @@ fn save_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 .wrap(),
             );
             if shown != name {
-                title.on_hover_text(&name);
+                title.tip(&name);
             }
         });
         ui.add_space(6.0);
