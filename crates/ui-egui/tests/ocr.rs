@@ -151,8 +151,14 @@ fn an_ocr_word_opens_for_editing_and_stays_open() {
     let p = r.min + egui::vec2(100.0, 93.0) * k;
     h.hover_at(p);
     h.run_steps(2);
-    for pressed in [true, false] {
-        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+    // Thai edition: a double click opens the word for typing (one click selects it). The press
+    // times are set, as kittest otherwise advances a quarter of a second a frame.
+    let start = h.ctx.input(|i| i.time) + 1.0;
+    for (k, pressed) in [true, false, true, false].into_iter().enumerate() {
+        let input = h.input_mut();
+        input.time = Some(start + 0.03 * (k + 1) as f64);
+        input.events.push(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+        h.step();
     }
     h.run_steps(4);
     let opened = |h: &Harness<'_, PdfCraftApp>| h.state().views[0].line_editor.as_ref().map(|e| e.text.clone());

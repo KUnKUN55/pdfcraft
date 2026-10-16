@@ -99,6 +99,22 @@ fn click(h: &mut Harness<'static, PdfCraftApp>, p: Pos2, mods: Modifiers) {
     }
     h.run_steps(4);
 }
+
+/// Thai edition: a double click opens a paragraph for typing (one click selects it). The press
+/// times are set, as kittest otherwise advances a quarter of a second a frame.
+fn double_click(h: &mut Harness<'static, PdfCraftApp>, p: Pos2) {
+    h.hover_at(p);
+    h.run_steps(2);
+    let start = h.ctx.input(|i| i.time) + 1.0;
+    for (k, pressed) in [true, false, true, false].into_iter().enumerate() {
+        let input = h.input_mut();
+        input.time = Some(start + 0.03 * (k + 1) as f64);
+        input.events.push(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.step();
+    }
+    h.run_steps(4);
+}
+
 fn marquee(h: &mut Harness<'static, PdfCraftApp>) {
     let (a, b) = (at(h, 25.0, 45.0), at(h, 235.0, 175.0));
     h.hover_at(a);
@@ -156,7 +172,7 @@ fn marquee_and_mixed_group_drag_move_once_and_undo_together() {
 fn modifier_clicks_extend_an_ordinary_selection_and_toggle_objects() {
     let mut h = harness();
     let p = at(&h, 55.0, 70.0);
-    click(&mut h, p, Modifiers::NONE);
+    double_click(&mut h, p);
     assert!(h.state().views[0].line_editor.is_some());
     let p = at(&h, 60.0, 145.0);
     click(&mut h, p, Modifiers::SHIFT);
@@ -203,7 +219,7 @@ fn a_changed_text_editor_is_kept_when_group_selection_is_requested() {
     let mut h = harness();
     let before = objects(&h);
     let p = at(&h, 55.0, 70.0);
-    click(&mut h, p, Modifiers::NONE);
+    double_click(&mut h, p);
     h.state_mut().views[0].line_editor.as_mut().unwrap().text = "A draft still being edited".into();
     let p = at(&h, 60.0, 145.0);
     click(&mut h, p, Modifiers::SHIFT);
