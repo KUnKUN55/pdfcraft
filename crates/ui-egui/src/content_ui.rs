@@ -528,6 +528,10 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
         } else {
             r.width().max(60.0)
         };
+        // An Area lays out within last frame's size, so a box that grows (a word pasted, or typed
+        // in one go) would widen a step a frame with ✓ and ✕ sliding right under the pointer. Room
+        // to the page's edge plus the buttons lets it take its width at once.
+        ui.set_max_width(width.max(xf.rect.right() - r.left()) + 80.0);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let resp = ui.add(
