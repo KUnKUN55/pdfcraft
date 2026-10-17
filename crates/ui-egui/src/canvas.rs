@@ -2367,7 +2367,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     view.text_background.prepare(ui.ctx(), doc, view.line_editor.as_ref(), scale);
     let added = doc.added.clone();
     // The selected added item's layer, for the Arrange keys (Thai edition).
-    let selected_layer = view.content.selected.and_then(|(p, i)| doc.added_layer(p, i));
+    let selected_layer = view.content.selected.map_or((None, 0), |(p, i)| (doc.added_layer(p, i), doc.comments_over(p, i)));
     let doc_links = if tool == QuickTool::Link { doc.links.clone() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);

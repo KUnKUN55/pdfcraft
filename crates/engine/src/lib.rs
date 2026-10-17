@@ -460,6 +460,12 @@ impl Document {
         pdfcraft_edit::added_layer(&self.editor.as_ref()?.cos, page, index)
     }
 
+    /// How many comments cover added item `index` of `page` (Bring to front places them on the
+    /// page so the item can go in front of them).
+    pub fn comments_over(&self, page: usize, index: usize) -> usize {
+        self.editor.as_ref().map_or(0, |e| pdfcraft_edit::comments_over(&e.cos, page, index).len())
+    }
+
     pub fn editable_objects(&self, page: usize) -> Result<Vec<EditableObject>, String> {
         let editor = self.editor.as_ref().ok_or("the document can't be read")?;
         pdfcraft_edit::editable_objects(&editor.cos, page).map_err(|e| e.to_string())
@@ -1501,6 +1507,14 @@ pub enum Edit {
     CommentToContent {
         page: usize,
         index: usize,
+        /// Then move it to this layer (Send backward or to back from the comment's menu).
+        then: Option<Arrange>,
+    },
+    /// Bring an added item in front of everything, the comments covering it included (they are
+    /// placed on the page first; Thai edition).
+    BringOverComments {
+        page: usize,
+        index: usize,
     },
     /// Replace an added image with another file (keeping its box and transforms).
     ReplaceImage {
@@ -1876,7 +1890,10 @@ impl Edit {
             Edit::AddImage { .. } => Label::of("Add image"),
             Edit::UpdateContent { .. } => Label::of("Edit content"),
             Edit::DeleteContent { .. } => Label::of("Delete content"),
-            Edit::CommentToContent { .. } => Label::of("Place on the page"),
+            Edit::CommentToContent { then: None, .. } => Label::of("Place on the page"),
+            Edit::CommentToContent { then: Some(Arrange::Back), .. } => Label::of("Send to back"),
+            Edit::CommentToContent { then: Some(_), .. } => Label::of("Send backward"),
+            Edit::BringOverComments { .. } => Label::of("Bring to front"),
             Edit::ArrangeContent { how, .. } | Edit::ArrangeAnnotation { how, .. } => Label::of(match how {
                 Arrange::Front => "Bring to front",
                 Arrange::Forward => "Bring forward",
@@ -2022,6 +2039,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::MoveObjects { .. }
         | Edit::DeleteContent { .. }
         | Edit::CommentToContent { .. }
+        | Edit::BringOverComments { .. }
         | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::ClearRedactions
@@ -2432,8 +2450,14 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::ArrangeAnnotation { page, index, how } => {
             pdfcraft_annot::arrange_annotation(doc, *page, *index, *how)?;
         }
-        Edit::CommentToContent { page, index } => {
-            pdfcraft_edit::comment_to_content(doc, *page, *index)?;
+        Edit::CommentToContent { page, index, then } => {
+            let at = pdfcraft_edit::comment_to_content(doc, *page, *index)?;
+            if let Some(how) = then {
+                pdfcraft_edit::arrange_content(doc, *page, at, *how)?;
+            }
+        }
+        Edit::BringOverComments { page, index } => {
+            pdfcraft_edit::bring_over_comments(doc, *page, *index)?;
         }
         Edit::ReplaceImage { page, index, name, bytes } => {
             let item = pdfcraft_edit::list_added(doc).into_iter().filter(|a| a.page == *page).nth(*index);

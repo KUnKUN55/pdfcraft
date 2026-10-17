@@ -1440,12 +1440,25 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 .filter(|x| x.page == page && pdfcraft_engine::arranged_comment(x.subtype.as_bytes(), x.in_reply_to.is_some()))
                 .map(|x| x.index)
                 .collect();
+            // Behind the page's text and images, a comment goes onto the page first.
+            use pdfcraft_engine::Arrange;
+            let among = |how| pdfcraft_engine::arranged_position(&layers, index, how);
+            let behind = |how| match how {
+                Arrange::Back => true,
+                Arrange::Backward => among(how).is_none(),
+                Arrange::Front | Arrange::Forward => false,
+            };
             ui.add_enabled_ui(allowed, |ui| {
-                if let Some(how) = crate::content_ui::arrange_menu(ui, |how| pdfcraft_engine::arranged_position(&layers, index, how).is_some()) {
-                    if let Some(to) = pdfcraft_engine::arranged_position(&layers, index, how) {
-                        view.comments.selected = Some((page, to));
+                if let Some(how) = crate::content_ui::arrange_menu(ui, |how| among(how).is_some() || behind(how) && !a.locked) {
+                    if behind(how) {
+                        view.comments.selected = None;
+                        action = Some(CanvasAction::Edit(Box::new(Edit::CommentToContent { page, index, then: Some(how) })));
+                    } else {
+                        if let Some(to) = among(how) {
+                            view.comments.selected = Some((page, to));
+                        }
+                        action = Some(CanvasAction::Edit(Box::new(Edit::ArrangeAnnotation { page, index, how })));
                     }
-                    action = Some(CanvasAction::Edit(Box::new(Edit::ArrangeAnnotation { page, index, how })));
                 }
             });
             if ui
@@ -1454,7 +1467,7 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 .clicked()
             {
                 view.comments.selected = None;
-                action = Some(CanvasAction::Edit(Box::new(Edit::CommentToContent { page, index })));
+                action = Some(CanvasAction::Edit(Box::new(Edit::CommentToContent { page, index, then: None })));
                 ui.close();
             }
             ui.separator();

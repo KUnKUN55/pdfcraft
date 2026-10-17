@@ -126,8 +126,8 @@ fn overlapping_text_boxes_are_arranged_from_the_menu_and_the_keys() {
     assert_eq!(texts(&h), ["Over", "Under"]);
 }
 
-/// Thai edition: a comment drawn over text is placed on the page from its right-click menu, and
-/// then goes behind the text with Send to back.
+/// Thai edition: a comment drawn over text goes behind it with Send to back from its
+/// right-click menu (placed on the page first).
 #[test]
 fn a_comment_placed_on_the_page_goes_behind_text() {
     let mut h = harness();
@@ -165,20 +165,20 @@ fn a_comment_placed_on_the_page_goes_behind_text() {
         h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
     }
     h.run_steps(3);
-    h.get_by_label("Place on the page").click();
+    // The page's only comment: Send to back places it on the page, behind the text.
+    h.get_by_label_contains("Arrange").click();
+    h.run_steps(2);
+    h.get_by_label_contains("Send to back").click();
     h.run_steps(6);
     assert_eq!(comments(&h), 0, "no longer a comment");
     assert_eq!(texts(&h), ["Over"]);
     assert_eq!(added(&h).len(), 2);
-    assert!(matches!(added(&h)[1].content, pdfcraft_engine::AddedContent::Image(_)), "the comment is now the picture on top");
+    assert!(matches!(added(&h)[0].content, pdfcraft_engine::AddedContent::Image(_)), "the comment is now the picture behind the text");
     let undo = {
         let s = h.state();
         s.session.get(s.views[0].id).unwrap().can_undo().map(str::to_owned)
     };
-    assert_eq!(undo.as_deref(), Some("Place on the page"));
-    h.state_mut().apply_edit(pdfcraft_engine::Edit::ArrangeContent { page: 0, index: 1, how: pdfcraft_engine::Arrange::Back });
-    h.run_steps(3);
-    assert!(matches!(added(&h)[0].content, pdfcraft_engine::AddedContent::Image(_)), "the picture is behind the text now");
+    assert_eq!(undo.as_deref(), Some("Send to back"));
 }
 
 #[test]

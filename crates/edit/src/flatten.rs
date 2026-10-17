@@ -385,3 +385,76 @@ pub fn comment_to_content(doc: &mut Document, page: usize, index: usize) -> Resu
     *doc = work;
     Ok(at)
 }
+
+/// The comments (their positions in `/Annots`) that cover added item `index` of `page`: drawn
+/// on the page, not locked, with an appearance, and overlapping the item's box (Thai edition).
+/// Comments are drawn above the page's content, so the item can only come in front of these
+/// once they are placed on the page.
+pub fn comments_over(doc: &Document, page: usize, index: usize) -> Vec<usize> {
+    let Some(a) = crate::list_added(doc).into_iter().filter(|a| a.page == page).nth(index) else { return Vec::new() };
+    let Some(p) = page_list(doc).into_iter().nth(page) else { return Vec::new() };
+    let view = p.view_matrix(doc);
+    let r = a.content.rect();
+    let to_user = |x: f64, y: f64| (view[0] * x + view[2] * y + view[4], view[1] * x + view[3] * y + view[5]);
+    let corners = [(r[0], r[1]), (r[2], r[1]), (r[0], r[3]), (r[2], r[3])].map(|(x, y)| to_user(x, y));
+    let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| (lo.min(c.0), hi.max(c.0)));
+    let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| (lo.min(c.1), hi.max(c.1)));
+    let list = p.dict.get(b"Annots").map(|l| doc.resolve(l)).and_then(|l| l.as_array().cloned()).unwrap_or_default();
+    list.iter()
+        .enumerate()
+        .filter_map(|(i, e)| {
+            let d = doc.resolve(e).as_dict().cloned()?;
+            let flags = d.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
+            let drawn = pdfcraft_annot::arranged_comment(d.name(b"Subtype").unwrap_or_default(), d.get(b"IRT").is_some())
+                && flags & (HIDDEN | NO_VIEW | 128) == 0
+                && appearance(doc, &d).is_some();
+            let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4)?;
+            let (cx0, cx1, cy0, cy1) = (rect[0].min(rect[2]), rect[0].max(rect[2]), rect[1].min(rect[3]), rect[1].max(rect[3]));
+            (drawn && cx0 < x1 && cx1 > x0 && cy0 < y1 && cy1 > y0).then_some(i)
+        })
+        .collect()
+}
+
+/// Bring added item `index` of `page` in front of everything, the comments that cover it
+/// included: those are placed on the page first ([`comment_to_content`]), so the item can go
+/// in front of them (Thai edition). Returns the item's new index among the page's added items.
+pub fn bring_over_comments(doc: &mut Document, page: usize, index: usize) -> Result<usize, EditError> {
+    let item = crate::list_added(doc)
+        .into_iter()
+        .filter(|a| a.page == page)
+        .nth(index)
+        .ok_or_else(|| EditError::Invalid(format!("page {} has no added item {}", page + 1, index + 1)))?
+        .obj;
+    let mut work = doc.clone();
+    // The covering comments by reference: placing one removes it (and its pop-up and replies)
+    // from `/Annots`, which renumbers the rest.
+    let refs: Vec<Option<ObjRef>> = {
+        let list = page_list(&work)
+            .into_iter()
+            .nth(page)
+            .and_then(|p| p.dict.get(b"Annots").map(|l| work.resolve(l)).and_then(|l| l.as_array().cloned()))
+            .unwrap_or_default();
+        comments_over(&work, page, index).into_iter().map(|i| list.get(i).and_then(Object::as_ref)).collect()
+    };
+    for r in refs.into_iter().flatten() {
+        let list = page_list(&work)
+            .into_iter()
+            .nth(page)
+            .and_then(|p| p.dict.get(b"Annots").map(|l| work.resolve(l)).and_then(|l| l.as_array().cloned()))
+            .unwrap_or_default();
+        if let Some(i) = list.iter().position(|e| e.as_ref() == Some(r)) {
+            comment_to_content(&mut work, page, i)?;
+        }
+    }
+    let at = crate::list_added(&work)
+        .into_iter()
+        .filter(|a| a.page == page)
+        .position(|a| a.obj == item)
+        .ok_or_else(|| EditError::Invalid("the item was lost while arranging".into()))?;
+    let to = match crate::added_layer(&work, page, at) {
+        Some((layer, count)) if layer + 1 < count => crate::arrange_content(&mut work, page, at, crate::Arrange::Front)?,
+        _ => at,
+    };
+    *doc = work;
+    Ok(to)
+}

@@ -492,11 +492,11 @@ pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_en
         return false;
     };
     let Some((_, a)) = on_page(&doc.added, page).into_iter().find(|(i, _)| *i == index) else { return false };
-    let layer = doc.added_layer(page, index);
-    match item_menu(ui, |how| arrange_moves(layer, how)) {
+    let (layer, covered) = (doc.added_layer(page, index), doc.comments_over(page, index));
+    match item_menu(ui, |how| arrange_moves(layer, how) || how == Arrange::Front && covered > 0) {
         Some(ItemChoice::Arrange(how)) => {
             view.content.follow = Some((page, a.obj));
-            view.pending_edit = Some(Edit::ArrangeContent { page, index, how });
+            view.pending_edit = Some(arrange_edit(page, index, how, covered));
         }
         Some(ItemChoice::Delete) => {
             (view.content.selected, view.content.menu) = (None, None);
@@ -505,6 +505,12 @@ pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_en
         None => {}
     }
     true
+}
+
+/// The edit for Arrange `how` on added item `index` of `page`: in front of everything takes it
+/// over the `covered` comments too, which go onto the page first.
+fn arrange_edit(page: usize, index: usize, how: Arrange, covered: usize) -> Edit {
+    if how == Arrange::Front && covered > 0 { Edit::BringOverComments { page, index } } else { Edit::ArrangeContent { page, index, how } }
 }
 
 /// Whether `how` moves an item at `layer` (its layer, and how many the page has).
@@ -606,7 +612,7 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
 }
 
 /// Delete removes the selected item; Escape clears the selection; the arrow keys move it.
-pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added], layer: Option<(usize, usize)>) {
+pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added], (layer, covered): (Option<(usize, usize)>, usize)) {
     if view.content.selected.is_none() || view.content.draft.is_some() || ctx.egui_wants_keyboard_input() {
         return;
     }
@@ -615,12 +621,12 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added], lay
         view.pending_edit = Some(Edit::DeleteContent { page, index });
     } else if let Some(how) = arrange_key(ctx)
         && view.pending_edit.is_none()
-        && arrange_moves(layer, how)
+        && (arrange_moves(layer, how) || how == Arrange::Front && covered > 0)
         && let Some((page, index)) = view.content.selected
         && let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index)
     {
         view.content.follow = Some((page, a.obj));
-        view.pending_edit = Some(Edit::ArrangeContent { page, index, how });
+        view.pending_edit = Some(arrange_edit(page, index, how, covered));
     } else if esc {
         view.content.selected = None;
     } else if let Some([dx, dy]) = nudge(ctx)

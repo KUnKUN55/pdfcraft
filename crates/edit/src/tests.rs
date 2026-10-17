@@ -3687,3 +3687,35 @@ fn an_items_measured_face_is_the_face_it_is_written_as() {
     let courier = |italic| Family::Courier.width("Anna", 12.0, false, italic);
     assert_eq!(courier(false), courier(true));
 }
+
+/// Thai edition: Bring to front takes an added item over the comments covering it (placed on
+/// the page first); comments elsewhere stay comments.
+#[test]
+fn bring_to_front_takes_an_item_over_the_comments_covering_it() {
+    use pdfcraft_annot::{Meta, NewAnnotation, Shape, Style, add_annotation};
+    let mut doc = fixture();
+    let square = |doc: &mut Document, rect: [f64; 4], id: &str| {
+        let new = NewAnnotation { page: 0, shape: Shape::Rectangle { rect }, style: Style::default(), contents: String::new(), author: "Now".into() };
+        add_annotation(doc, &new, &Meta { id: id.into(), ..Meta::default() }).unwrap()
+    };
+    let text = Content::Text(AddedText { rect: [80.0, 640.0, 300.0, 680.0], text: "Over".into(), ..AddedText::default() });
+    add_content(&mut doc, 0, &text).unwrap();
+    square(&mut doc, [72.0, 600.0, 200.0, 700.0], "covering");
+    square(&mut doc, [400.0, 100.0, 500.0, 200.0], "elsewhere");
+    assert_eq!(comments_over(&doc, 0, 0), [0]);
+    assert_eq!(added_layer(&doc, 0, 0), Some((1, 2)), "already in front of the page's own content");
+    let at = bring_over_comments(&mut doc, 0, 0).unwrap();
+    let names: Vec<String> = list_added(&doc)
+        .iter()
+        .map(|a| match &a.content {
+            Content::Text(t) => t.text.clone(),
+            Content::Image(_) => "picture".into(),
+        })
+        .collect();
+    assert_eq!(names, ["picture", "Over"]);
+    assert_eq!(at, 1);
+    assert_eq!(added_layer(&doc, 0, 1), Some((2, 3)), "on top of everything");
+    assert!(comments_over(&doc, 0, 1).is_empty());
+    let p = &pdfcraft_model::pages(&doc)[0];
+    assert_eq!(doc.resolve(p.dict.get(b"Annots").unwrap()).as_array().unwrap().len(), 1, "the other comment stays");
+}
