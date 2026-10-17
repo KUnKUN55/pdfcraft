@@ -2612,3 +2612,7 @@ key	Space	Space
 # Copy and paste comments (Thai edition).
 	Paste comment	วางความคิดเห็น
 	The copied comment is no longer in the document	ความคิดเห็นที่คัดลอกไว้ไม่อยู่ในเอกสารแล้ว
+# Move and copy to another page (Thai edition).
+	Move to another page	ย้ายไปหน้าอื่น
+	Copy to another page	คัดลอกไปหน้าอื่น
+	Copy object	คัดลอกวัตถุ

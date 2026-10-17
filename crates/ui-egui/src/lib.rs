@@ -384,6 +384,17 @@ pub struct TextClip {
 /// How far each paste of a copied text box is offset from the last, in points.
 pub(crate) const PASTE_STEP: f64 = 12.0;
 
+/// An added picture copied with ⌘C in Edit a PDF (Thai edition), with the text put on the system
+/// clipboard for it, by which ⌘V knows the clipboard still holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageClip {
+    pub content: pdfcraft_engine::AddedContent,
+    pub page: usize,
+    pub index: usize,
+    pub marker: String,
+    pub pastes: u32,
+}
+
 /// A comment copied with ⌘C (Thai edition): where it is, and the text put on the system clipboard
 /// with it, by which ⌘V knows the clipboard still holds it.
 #[derive(Clone, Debug, PartialEq)]
@@ -727,6 +738,8 @@ pub struct PdfCraftApp {
     pub text_clipboard: Option<TextClip>,
     /// A comment copied with ⌘C, ready to paste (Thai edition).
     pub comment_clip: Option<CommentClip>,
+    /// An added picture copied with ⌘C, ready to paste (Thai edition).
+    pub image_clip: Option<ImageClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
     grid_drop: Option<GridDrop>,
     /// The last snapshot (width, height, RGBA); `system_clipboard` also puts it on the
@@ -1026,6 +1039,7 @@ impl PdfCraftApp {
             page_clipboard: None,
             text_clipboard: None,
             comment_clip: None,
+            image_clip: None,
             grid_drop: None,
             last_snapshot: None,
             last_copied_image: None,
@@ -2805,6 +2819,10 @@ impl PdfCraftApp {
                 self.paste_comment(i);
                 return;
             }
+            if self.image_clip.as_ref().is_some_and(|c| c.marker == text) {
+                self.paste_added_image(i);
+                return;
+            }
             self.paste_text_box(i, &text);
         } else if self.dialog.is_none() && !self.palette_open && image_paste_key(ctx) {
             // ⌘V with a picture on the clipboard (Thai edition): egui sends no Paste for one.
@@ -2817,6 +2835,11 @@ impl PdfCraftApp {
         if let Some((page, index)) = self.views.get(i).and_then(|v| v.comments.selected)
             && self.copy_comment(i, page, index, ctx)
         {
+            return;
+        }
+        if let Some(clip) = self.image_to_copy(i) {
+            ctx.copy_text(clip.marker.clone());
+            self.image_clip = Some(clip);
             return;
         }
         if let Some(clip) = self.text_box_to_copy(i) {
@@ -2930,6 +2953,48 @@ impl PdfCraftApp {
             if let Some(newest) = newest {
                 self.views[i].comments.selected = Some((to_page, newest));
             }
+        }
+    }
+
+    /// The selected added picture in Edit a PDF, to copy.
+    fn image_to_copy(&self, i: usize) -> Option<ImageClip> {
+        if !self.editing_content() {
+            return None;
+        }
+        let view = self.views.get(i)?;
+        let doc = self.session.get(view.id)?;
+        let (page, index) = view.content.selected.filter(|_| view.content.draft.is_none())?;
+        let content = doc.added.iter().filter(|a| a.page == page).nth(index)?.content.clone();
+        matches!(content, pdfcraft_engine::AddedContent::Image(_)).then(|| ImageClip {
+            content,
+            page,
+            index,
+            marker: format!("[{}]", tl!("Image")),
+            pastes: 0,
+        })
+    }
+
+    /// ⌘V with a copied added picture: another on the current page, a step down and right of the
+    /// last one on its own page, where it was on another; selected.
+    fn paste_added_image(&mut self, i: usize) {
+        if !self.editing_content() {
+            self.left = LeftPanel::Tool("edit");
+            self.left_open = true;
+        }
+        let Some(clip) = self.image_clip.clone() else { return };
+        let Some(view) = self.views.get(i) else { return };
+        let to_page = view.current;
+        let Some(doc) = self.session.get(view.id) else { return };
+        let steps = if to_page == clip.page { clip.pastes.saturating_add(1) } else { clip.pastes };
+        let shift = PASTE_STEP * f64::from(steps.min(40));
+        let r = clip.content.rect();
+        let content = clip.content.with_rect([r[0] + shift, r[1] - shift, r[2] + shift, r[3] - shift]);
+        let before = doc.added.iter().filter(|a| a.page == to_page).count();
+        if self.apply_edit(pdfcraft_engine::Edit::MoveContentToPage { page: clip.page, index: clip.index, to_page, content, copy: true }) {
+            if let Some(c) = self.image_clip.as_mut() {
+                c.pastes = c.pastes.saturating_add(1);
+            }
+            self.views[i].content.select_added = Some((to_page, before));
         }
     }
 

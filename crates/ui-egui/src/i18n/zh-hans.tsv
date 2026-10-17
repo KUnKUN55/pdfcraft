@@ -2332,3 +2332,7 @@ animation effects	Off	关
 # Copy and paste comments (Thai edition).
 	Paste comment	粘贴注释
 	The copied comment is no longer in the document	复制的注释已不在文档中
+# Move and copy to another page (Thai edition).
+	Move to another page	移到其他页面
+	Copy to another page	复制到其他页面
+	Copy object	复制对象

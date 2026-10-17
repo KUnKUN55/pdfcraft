@@ -2612,3 +2612,7 @@ key	Space	Tarpas
 # Copy and paste comments (Thai edition).
 	Paste comment	Įklijuoti komentarą
 	The copied comment is no longer in the document	Nukopijuoto komentaro dokumente nebėra
+# Move and copy to another page (Thai edition).
+	Move to another page	Perkelti į kitą puslapį
+	Copy to another page	Kopijuoti į kitą puslapį
+	Copy object	Kopijuoti objektą

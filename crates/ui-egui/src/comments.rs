@@ -880,6 +880,8 @@ fn select_input(
     origin: Option<Pos2>,
     pressed_here: bool,
 ) -> bool {
+    // The other page under the pointer, where a dragged comment lands (Thai edition).
+    let drop_other = pointer.and_then(|p| view.other_page_at(cx.page, p));
     let cv = &mut view.comments;
     let selected = cv.selected.filter(|(p, _)| *p == cx.page).and_then(|(_, i)| cx.get(i));
     // Handles of a selected, resizable comment.
@@ -945,7 +947,16 @@ fn select_input(
                 // Ctrl held as it is dropped leaves it where it was and drops a copy (Thai edition).
                 let copying = ui.input(|i| i.modifiers.command)
                     && cx.get(index).is_some_and(|a| pdfcraft_engine::copyable_comment(a.subtype.as_bytes(), a.in_reply_to.is_some()));
-                if from.distance(p) >= 2.0 {
+                if let Some((to_page, txf)) = drop_other {
+                    // Dropped on another page: it goes there, where it was dropped (Thai edition).
+                    let (vx, vy) = txf.screen_to_view(p);
+                    let b = cx.info.pages[to_page].view_to_user(vx, vy);
+                    let (dx, dy) = (f64::from(b[0]) - a[0], f64::from(b[1]) - a[1]);
+                    if cx.get(index).is_some_and(|a| pdfcraft_engine::copyable_comment(a.subtype.as_bytes(), a.in_reply_to.is_some())) {
+                        cv.selected = None;
+                        view.pending_edit = Some(Edit::MoveAnnotationToPage { page, index, to_page, dx, dy, copy: copying });
+                    }
+                } else if from.distance(p) >= 2.0 {
                     view.pending_edit = Some(if copying {
                         Edit::DuplicateAnnotation { page, index, to_page: page, dx, dy }
                     } else {

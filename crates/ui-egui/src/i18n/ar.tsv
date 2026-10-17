@@ -2389,3 +2389,7 @@ animation effects	Off	معطّلة
 # Copy and paste comments (Thai edition).
 	Paste comment	لصق التعليق
 	The copied comment is no longer in the document	لم يعد التعليق المنسوخ موجودًا في المستند
+# Move and copy to another page (Thai edition).
+	Move to another page	نقل إلى صفحة أخرى
+	Copy to another page	نسخ إلى صفحة أخرى
+	Copy object	نسخ الكائن

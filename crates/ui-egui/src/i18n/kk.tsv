@@ -2366,3 +2366,7 @@ animation effects	Off	Өшірулі
 # Copy and paste comments (Thai edition).
 	Paste comment	Түсініктемені қою
 	The copied comment is no longer in the document	Көшірілген түсініктеме құжатта енді жоқ
+# Move and copy to another page (Thai edition).
+	Move to another page	Басқа бетке жылжыту
+	Copy to another page	Басқа бетке көшіру
+	Copy object	Нысанды көшіру

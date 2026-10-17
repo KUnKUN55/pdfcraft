@@ -2281,3 +2281,7 @@ animation effects	Off	Выкл
 # Copy and paste comments (Thai edition).
 	Paste comment	Вставить комментарий
 	The copied comment is no longer in the document	Скопированного комментария больше нет в документе
+# Move and copy to another page (Thai edition).
+	Move to another page	Переместить на другую страницу
+	Copy to another page	Копировать на другую страницу
+	Copy object	Копировать объект

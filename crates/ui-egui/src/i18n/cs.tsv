@@ -2442,3 +2442,7 @@ animation effects	Off	Vypnuto
 # Copy and paste comments (Thai edition).
 	Paste comment	Vložit komentář
 	The copied comment is no longer in the document	Zkopírovaný komentář už v dokumentu není
+# Move and copy to another page (Thai edition).
+	Move to another page	Přesunout na jinou stránku
+	Copy to another page	Kopírovat na jinou stránku
+	Copy object	Kopírovat objekt

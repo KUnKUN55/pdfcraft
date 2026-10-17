@@ -339,6 +339,8 @@ pub(crate) fn page_input(
 ) -> bool {
     let mut consumed = false;
     let pointer = ui.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos()));
+    // The other page under the pointer, where a dragged item lands (Thai edition).
+    let drop_other = pointer.and_then(|p| view.other_page_at(page, p));
     let cv = &mut view.content;
     if let Some((gp, grab, start)) = cv.grab
         && gp == page
@@ -354,9 +356,15 @@ pub(crate) fn page_input(
             {
                 let keep = matches!(a.content, AddedContent::Image(_));
                 let from = screen_rect(xf, info, page, a.content.rect());
-                let d = if grab == Grab::Move { snap_to_centre(ui, xf.rect, from, end - start) } else { end - start };
+                // Dropped on another page (Thai edition): it goes there, where it was dropped.
+                let other = (grab == Grab::Move).then_some(drop_other).flatten();
+                let (to_page, txf) = other.unwrap_or((page, *xf));
+                let d = match (grab, other) {
+                    (Grab::Move, None) => snap_to_centre(ui, xf.rect, from, end - start),
+                    _ => end - start,
+                };
                 let r = dragged(from, grab, d, keep);
-                let (p0, p1) = (to_display(xf, info, page, r.left_bottom()), to_display(xf, info, page, r.right_top()));
+                let (p0, p1) = (to_display(&txf, info, to_page, r.left_bottom()), to_display(&txf, info, to_page, r.right_top()));
                 let mut rect = [p0[0], p0[1], p1[0], p1[1]];
                 if let AddedContent::Text(t) = &a.content
                     && grab == Grab::Move
@@ -368,9 +376,16 @@ pub(crate) fn page_input(
                 // (Thai edition), as in Word.
                 let copying = ui.input(|i| i.modifiers.command);
                 view.pending_edit = Some(match &a.content {
-                    AddedContent::Text(t) if copying && grab == Grab::Move => {
+                    AddedContent::Text(t) if copying && grab == Grab::Move && to_page == page => {
                         cv.select_added = Some((page, on_page(added, page).len()));
                         Edit::AddText { page, text: AddedText { rect, ..t.clone() } }
+                    }
+                    // A picture copied, or anything taken to another page: the item there (Thai
+                    // edition), selected.
+                    _ if grab == Grab::Move && (to_page != page || copying) => {
+                        cv.select_added = Some((to_page, on_page(added, to_page).len()));
+                        cv.selected = None;
+                        Edit::MoveContentToPage { page, index: si, to_page, content: a.content.with_rect(rect), copy: copying }
                     }
                     _ => Edit::UpdateContent { page, index: si, content: a.content.with_rect(rect) },
                 });
@@ -390,6 +405,28 @@ pub(crate) fn page_input(
             cv.selected = Some((page, i));
             cv.menu = Some((page, i));
             consumed = true;
+        }
+    }
+    // A drag starts where the button went down, which the pointer may already have left by the
+    // time egui calls it a drag (a quick drag toward another page; Thai edition).
+    if resp.drag_started()
+        && cv.draft.is_none()
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin()).filter(|o| xf.rect.contains(*o))
+    {
+        let items = on_page(added, page);
+        let selected_rect = cv
+            .selected
+            .filter(|s| s.0 == page)
+            .and_then(|(_, si)| items.iter().find(|(i, _)| *i == si))
+            .map(|(_, a)| screen_rect(xf, info, page, a.content.rect()));
+        if let Some((_, left, top)) = selected_rect.and_then(|r| handles(r).into_iter().find(|(c, ..)| c.distance(origin) <= 6.0)) {
+            cv.grab = Some((page, Grab::Corner(left, top), origin));
+            return true;
+        }
+        if let Some((i, _)) = items.iter().rev().find(|(_, a)| screen_rect(xf, info, page, a.content.rect()).expand(2.0).contains(origin)) {
+            cv.selected = Some((page, *i));
+            cv.grab = Some((page, Grab::Move, origin));
+            return true;
         }
     }
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return consumed };

@@ -2281,3 +2281,7 @@ animation effects	Off	ఆఫ్
 # Copy and paste comments (Thai edition).
 	Paste comment	వ్యాఖ్యను అతికించు
 	The copied comment is no longer in the document	కాపీ చేసిన వ్యాఖ్య ఇక పత్రంలో లేదు
+# Move and copy to another page (Thai edition).
+	Move to another page	మరో పేజీకి తరలించు
+	Copy to another page	మరో పేజీకి కాపీ చేయి
+	Copy object	వస్తువును కాపీ చేయి

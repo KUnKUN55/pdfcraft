@@ -2373,3 +2373,7 @@ animation effects	Off	Izklopljeni
 # Copy and paste comments (Thai edition).
 	Paste comment	Prilepi komentar
 	The copied comment is no longer in the document	Kopiranega komentarja ni več v dokumentu
+# Move and copy to another page (Thai edition).
+	Move to another page	Premakni na drugo stran
+	Copy to another page	Kopiraj na drugo stran
+	Copy object	Kopiraj predmet

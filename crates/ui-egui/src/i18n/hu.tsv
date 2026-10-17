@@ -2367,3 +2367,7 @@ animation effects	Off	Ki
 # Copy and paste comments (Thai edition).
 	Paste comment	Megjegyzés beillesztése
 	The copied comment is no longer in the document	A másolt megjegyzés már nincs a dokumentumban
+# Move and copy to another page (Thai edition).
+	Move to another page	Áthelyezés másik oldalra
+	Copy to another page	Másolás másik oldalra
+	Copy object	Objektum másolása

@@ -2378,3 +2378,7 @@ animation effects	Off	Ανενεργά
 # Copy and paste comments (Thai edition).
 	Paste comment	Επικόλληση σχολίου
 	The copied comment is no longer in the document	Το σχόλιο που αντιγράψατε δεν υπάρχει πλέον στο έγγραφο
+# Move and copy to another page (Thai edition).
+	Move to another page	Μετακίνηση σε άλλη σελίδα
+	Copy to another page	Αντιγραφή σε άλλη σελίδα
+	Copy object	Αντιγραφή αντικειμένου

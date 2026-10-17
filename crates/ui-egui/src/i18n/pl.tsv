@@ -2348,3 +2348,7 @@ animation effects	Off	Wyłączone
 # Copy and paste comments (Thai edition).
 	Paste comment	Wklej komentarz
 	The copied comment is no longer in the document	Skopiowanego komentarza nie ma już w dokumencie
+# Move and copy to another page (Thai edition).
+	Move to another page	Przenieś na inną stronę
+	Copy to another page	Kopiuj na inną stronę
+	Copy object	Kopiuj obiekt

@@ -2364,3 +2364,7 @@ animation effects	Off	Kapalı
 # Copy and paste comments (Thai edition).
 	Paste comment	Yorumu yapıştır
 	The copied comment is no longer in the document	Kopyalanan yorum artık belgede değil
+# Move and copy to another page (Thai edition).
+	Move to another page	Başka sayfaya taşı
+	Copy to another page	Başka sayfaya kopyala
+	Copy object	Nesneyi kopyala

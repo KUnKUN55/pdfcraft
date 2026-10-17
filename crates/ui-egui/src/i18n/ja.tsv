@@ -2368,3 +2368,7 @@ animation effects	Off	オフ
 # Copy and paste comments (Thai edition).
 	Paste comment	注釈を貼り付け
 	The copied comment is no longer in the document	コピーした注釈はもう文書にありません
+# Move and copy to another page (Thai edition).
+	Move to another page	別のページへ移動
+	Copy to another page	別のページへコピー
+	Copy object	オブジェクトをコピー

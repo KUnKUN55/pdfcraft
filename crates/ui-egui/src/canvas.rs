@@ -371,6 +371,9 @@ pub struct DocView {
     /// Screen rects of the pages drawn last frame (hit-testing, tests, automation).
     screen_rects: Vec<(usize, Rect)>,
     screen_xforms: Vec<(usize, PageXform)>,
+    /// The previous frame's, for pages not drawn yet this frame (Thai edition: a drop onto a
+    /// page after the dragged item's own).
+    last_screen_xforms: Vec<(usize, PageXform)>,
     /// The scroll viewport on screen last frame.
     viewport_screen: Rect,
     /// Pending zoom anchor: page, fractional position (also in gutters), and viewport offset.
@@ -628,6 +631,7 @@ impl DocView {
             page_heights: info.pages.iter().map(|p| p.height).collect(),
             screen_rects: Vec::new(),
             screen_xforms: Vec::new(),
+            last_screen_xforms: Vec::new(),
             viewport_screen: Rect::NOTHING,
             zoom_anchor: None,
             shown: false,
@@ -861,6 +865,13 @@ impl DocView {
     /// Where `page` is drawn this frame, with its coordinate mapping.
     pub(crate) fn page_xform(&self, page: usize) -> Option<PageXform> {
         self.screen_xforms.iter().find(|(p, _)| *p == page).map(|(_, xf)| *xf)
+    }
+
+    /// The page on screen under `p`, other than `page`, and where it is drawn (Thai edition: an
+    /// item dropped onto another page).
+    pub(crate) fn other_page_at(&self, page: usize, p: Pos2) -> Option<(usize, PageXform)> {
+        let under = |list: &[(usize, PageXform)]| list.iter().find(|(i, xf)| *i != page && xf.rect.contains(p)).copied();
+        under(&self.screen_xforms).or_else(|| under(&self.last_screen_xforms))
     }
 
     /// The text selection as markup quadrilaterals in user space: (page, quads).
@@ -2427,7 +2438,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let mut wanted = Vec::new();
         let mut visible_now = Vec::new();
         view.screen_rects.clear();
-        view.screen_xforms.clear();
+        view.last_screen_xforms = std::mem::take(&mut view.screen_xforms);
         // Visible heights (points) closer than this are equal: one page size can meet the
         // viewport a fraction of a point differently once the scroll offset is applied.
         const TIE: f32 = 0.5;

@@ -205,6 +205,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
         | Edit::DuplicateAnnotation { .. }
+        | Edit::MoveAnnotationToPage { .. }
         | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
@@ -229,6 +230,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::AddImage { .. }
         | Edit::UpdateContent { .. }
         | Edit::DeleteContent { .. }
+        | Edit::MoveContentToPage { .. }
         | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::AddHeaderFooter { .. }
@@ -1491,6 +1493,15 @@ pub enum Edit {
         page: usize,
         index: usize,
     },
+    /// Move (or, with `copy`, copy) added item `index` of `page` onto `to_page` as `content`
+    /// (its box there; Thai edition: an item dragged onto another page).
+    MoveContentToPage {
+        page: usize,
+        index: usize,
+        to_page: usize,
+        content: AddedContent,
+        copy: bool,
+    },
     /// Move an added item to another layer of its page (Thai edition: Arrange).
     ArrangeContent {
         page: usize,
@@ -1505,6 +1516,16 @@ pub enum Edit {
         to_page: usize,
         dx: f64,
         dy: f64,
+    },
+    /// Move (or, with `copy`, copy) comment `index` of `page` onto `to_page`, by (`dx`, `dy`)
+    /// in user space (Thai edition: a comment dragged onto another page).
+    MoveAnnotationToPage {
+        page: usize,
+        index: usize,
+        to_page: usize,
+        dx: f64,
+        dy: f64,
+        copy: bool,
     },
     /// Move a comment (`index` in the page's `/Annots`) among the page's comments (Thai edition).
     ArrangeAnnotation {
@@ -1837,6 +1858,9 @@ impl Edit {
             Edit::AddCustomStamp { .. } => Label::of("Add stamp"),
             Edit::DeleteAnnotation { .. } => Label::of("Delete comment"),
             Edit::DuplicateAnnotation { .. } => Label::of("Paste comment"),
+            Edit::MoveAnnotationToPage { copy: false, .. } | Edit::MoveContentToPage { copy: false, .. } => Label::of("Move to another page"),
+            Edit::MoveContentToPage { copy: true, page, to_page, .. } if page == to_page => Label::of("Copy object"),
+            Edit::MoveAnnotationToPage { copy: true, .. } | Edit::MoveContentToPage { copy: true, .. } => Label::of("Copy to another page"),
             Edit::SetAnnotationContents { .. } => Label::of("Edit comment"),
             Edit::ReplyToAnnotation { .. } => Label::of("Reply"),
             // The state's name is part of the wording: a language may need to agree it with the rest.
@@ -2004,6 +2028,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
         | Edit::DuplicateAnnotation { .. }
+        | Edit::MoveAnnotationToPage { .. }
         | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
@@ -2052,6 +2077,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::DeleteContent { .. }
         | Edit::CommentToContent { .. }
         | Edit::BringOverComments { .. }
+        | Edit::MoveContentToPage { .. }
         | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::ClearRedactions
@@ -2270,6 +2296,13 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::DuplicateAnnotation { page, index, to_page, dx, dy } => {
             pdfcraft_annot::duplicate_annotation(doc, *page, *index, *to_page, *dx, *dy, &cx.meta())?;
         }
+        Edit::MoveAnnotationToPage { page, index, to_page, dx, dy, copy } => {
+            pdfcraft_annot::duplicate_annotation(doc, *page, *index, *to_page, *dx, *dy, &cx.meta())?;
+            if !copy {
+                // The copy went to another page, so the original keeps its index.
+                pdfcraft_annot::delete_annotation(doc, *page, *index)?;
+            }
+        }
         Edit::ResizeAnnotation { page, index, rect } => pdfcraft_annot::set_rect(doc, *page, *index, *rect, &cx.meta())?,
         Edit::StyleAnnotation { page, index, color, opacity, width, endings } => {
             pdfcraft_annot::set_style(doc, *page, *index, *color, *opacity, *width, endings.as_deref(), &cx.meta())?;
@@ -2461,6 +2494,15 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::DeleteContent { page, index } => pdfcraft_edit::delete_content(doc, *page, *index)?,
         Edit::ArrangeContent { page, index, how } => {
             pdfcraft_edit::arrange_content(doc, *page, *index, *how)?;
+        }
+        Edit::MoveContentToPage { page, index, to_page, content, copy } => {
+            if page == to_page && !copy {
+                return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid("the item is already on that page".into())));
+            }
+            pdfcraft_edit::add_content(doc, *to_page, content)?;
+            if !copy {
+                pdfcraft_edit::delete_content(doc, *page, *index)?;
+            }
         }
         Edit::ArrangeAnnotation { page, index, how } => {
             pdfcraft_annot::arrange_annotation(doc, *page, *index, *how)?;
@@ -3691,6 +3733,7 @@ impl Session {
                     | Edit::AddImage { .. }
                     | Edit::UpdateContent { .. }
                     | Edit::DeleteContent { .. }
+                    | Edit::MoveContentToPage { .. }
                     | Edit::ArrangeContent { .. }
                     | Edit::ReplaceImage { .. }
             ) || matches!(e, Edit::MoveObjects { objects, .. } if objects.iter().any(|o| o.kind == ObjectKind::Added))

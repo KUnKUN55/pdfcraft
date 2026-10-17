@@ -218,6 +218,142 @@ fn comments_are_copied_and_pasted_with_the_keys() {
     assert_eq!(rects(&h).len(), 2);
 }
 
+/// Two pages, 300 × 400 points, for moving things between them.
+const TWO_PAGES: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// Thai edition: a text box dragged onto the next page goes there; with Ctrl held, a copy goes
+/// and the original stays. Comments and pictures go across too.
+#[test]
+fn items_are_dragged_and_copied_onto_another_page() {
+    let mut h = harness_bytes(TWO_PAGES.to_vec());
+    h.state_mut().set_option("zoom", "60").unwrap();
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let text = pdfcraft_engine::AddedText { rect: [40.0, 300.0, 200.0, 330.0], text: "Travels".into(), size: 14.0, ..Default::default() };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText { page: 0, text });
+    h.run_steps(4);
+    let on = |h: &Harness<'static, PdfCraftApp>, page: usize| added(h).iter().filter(|a| a.page == page).count();
+    // Drag it from page 1 onto page 2 (both on screen at this zoom).
+    // Press on a box, move in steps, release over `to`, with `modifiers` held throughout.
+    let drag = |h: &mut Harness<'static, PdfCraftApp>, from: Pos2, to: Pos2, modifiers: egui::Modifiers| {
+        h.event(egui::Event::ModifiersChanged(modifiers));
+        h.hover_at(from);
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers });
+        h.run_steps(2);
+        for k in 1..=10 {
+            h.hover_at(from + (to - from) * (k as f32 / 10.0));
+            h.run_steps(2);
+        }
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers });
+        h.run_steps(6);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(2);
+    };
+    // Where item `i` is drawn on screen.
+    let centre_of = |h: &Harness<'static, PdfCraftApp>, i: usize| {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let a = &doc.added[i];
+        let (w, ht) = (doc.info.pages[a.page].width, doc.info.pages[a.page].height);
+        let r = s.views[0].page_screen_rect(a.page).unwrap();
+        let b = a.content.rect();
+        r.min + egui::vec2(((b[0] + b[2]) / 2.0) as f32 / w * r.width(), (ht - ((b[1] + b[3]) / 2.0) as f32) / ht * r.height())
+    };
+    for _ in 0..100 {
+        h.run_steps(2);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let page2 = h.state().views[0].page_screen_rect(1).expect("page 2 on screen");
+    let from = centre_of(&h, 0);
+    drag(&mut h, from, page2.center(), egui::Modifiers::NONE);
+    assert_eq!((on(&h, 0), on(&h, 1)), (0, 1), "moved to page 2");
+    let undo = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().can_undo().map(str::to_owned)
+    };
+    assert_eq!(undo.as_deref(), Some("Move to another page"));
+    // Back to page 1, with Ctrl: a copy goes and the original stays.
+    let page1 = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+    let from = centre_of(&h, 0);
+    drag(&mut h, from, page1.center(), egui::Modifiers::COMMAND);
+    assert_eq!((on(&h, 0), on(&h, 1)), (1, 1), "a copy on page 1, the original still on page 2");
+    // A comment goes across, and a copy of it too.
+    let comment = pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape: pdfcraft_engine::Shape::Rectangle { rect: [40.0, 40.0, 120.0, 90.0] },
+        style: Default::default(),
+        contents: String::new(),
+        author: "Now".into(),
+    };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(comment));
+    h.run_steps(3);
+    let comments = |h: &Harness<'static, PdfCraftApp>, page: usize| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().info.annotations.iter().filter(|a| a.page == page).map(|a| a.index).collect::<Vec<_>>()
+    };
+    let index = comments(&h, 0)[0];
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::MoveAnnotationToPage { page: 0, index, to_page: 1, dx: 0.0, dy: 100.0, copy: false });
+    h.run_steps(3);
+    assert_eq!((comments(&h, 0).len(), comments(&h, 1).len()), (0, 1));
+    let index = comments(&h, 1)[0];
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::MoveAnnotationToPage { page: 1, index, to_page: 0, dx: 0.0, dy: 0.0, copy: true });
+    h.run_steps(3);
+    assert_eq!((comments(&h, 0).len(), comments(&h, 1).len()), (1, 1));
+}
+
+/// Thai edition: an added picture is copied with ⌘C and pasted with ⌘V, on its page or another.
+#[test]
+fn added_pictures_are_copied_and_pasted() {
+    let mut h = harness_bytes(TWO_PAGES.to_vec());
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 2, 2);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&[255u8; 16]).unwrap();
+    }
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddImage {
+        page: 0,
+        rect: Some([40.0, 200.0, 140.0, 300.0]),
+        name: "dot.png".into(),
+        bytes: std::sync::Arc::new(png),
+    });
+    h.run_steps(4);
+    h.state_mut().views[0].content.selected = Some((0, 0));
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    let marker = h.state().image_clip.as_ref().map(|c| c.marker.clone()).expect("copied");
+    h.event(egui::Event::Paste(marker.clone()));
+    h.run_steps(4);
+    let images = |h: &Harness<'static, PdfCraftApp>, page: usize| {
+        added(h)
+            .into_iter()
+            .filter(|a| a.page == page && matches!(a.content, pdfcraft_engine::AddedContent::Image(_)))
+            .map(|a| a.content.rect())
+            .collect::<Vec<_>>()
+    };
+    let on_one = images(&h, 0);
+    assert_eq!(on_one.len(), 2, "pasted beside it");
+    assert!((on_one[1][0] - on_one[0][0] - 12.0).abs() < 0.01);
+    h.state_mut().views[0].current = 1;
+    h.event(egui::Event::Paste(marker));
+    h.run_steps(4);
+    assert_eq!(images(&h, 1).len(), 1, "pasted on page 2");
+}
+
 #[test]
 fn clicking_elsewhere_keeps_the_text_and_starts_a_new_box() {
     // #74: a click elsewhere on the page threw away the text being typed and opened a new box.
