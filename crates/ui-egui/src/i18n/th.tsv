@@ -2598,3 +2598,9 @@ key	Space	Space
 	This document is trying to open a local file:	เอกสารนี้พยายามเปิดไฟล์ในเครื่อง:
 	Move tag earlier	ย้ายแท็กขึ้นก่อน
 	Move tag later	ย้ายแท็กลงทีหลัง
+# Arrange added text and images (Thai edition).
+	Arrange	จัดลำดับ
+	Bring to front	นำไปไว้ข้างหน้าสุด
+	Bring forward	นำไปข้างหน้า
+	Send backward	ย้ายไปข้างหลัง
+	Send to back	ย้ายไปไว้ข้างหลังสุด

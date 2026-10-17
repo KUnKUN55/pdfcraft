@@ -252,6 +252,17 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
     {
         if let Some(p) = pointer {
             gesture.now = p;
+            // Smart guides (Thai edition): what is moved, or the copy dropped, snaps its centre
+            // onto the page's centre lines.
+            if !gesture.marquee {
+                let moved = match gesture.copy {
+                    Some((_, rect)) => xf.user_rect(info, page, rect.map(|v| v as f32)),
+                    None => s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o))),
+                };
+                if moved.is_positive() {
+                    gesture.now = gesture.start + crate::content_ui::snap_to_centre(ui, xf.rect, moved, p - gesture.start);
+                }
+            }
         }
         if !down {
             if let Some((target, rect)) = gesture.copy {
@@ -510,6 +521,9 @@ pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: 
     if selection.selected.len() > 1 {
         painter.rect_stroke(union.expand(4.0), 0.0, Stroke::new(1.0, BLUE.gamma_multiply(0.7)), egui::StrokeKind::Outside);
     }
+    if selection.gesture.is_some_and(|g| !g.marquee && g.copy.is_none() && g.start.distance(g.now) > DRAG_SLOP) && union.is_positive() {
+        crate::content_ui::paint_guides(painter, xf.rect, union);
+    }
     if let Some(g) = selection.gesture.filter(|g| g.marquee) {
         let area = Rect::from_two_pos(g.start, g.now).intersect(xf.rect);
         painter.rect_filled(area, 0.0, BLUE.gamma_multiply(0.08));
@@ -522,6 +536,7 @@ pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: 
         let copy = xf.user_rect(info, page, rect.map(|v| v as f32)).translate(g.now - g.start);
         painter.rect_filled(copy, 0.0, BLUE.gamma_multiply(0.08));
         painter.rect_stroke(copy, 0.0, Stroke::new(1.5, BLUE), egui::StrokeKind::Outside);
+        crate::content_ui::paint_guides(painter, xf.rect, copy);
     }
 }
 

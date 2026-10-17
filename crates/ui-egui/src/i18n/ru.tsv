@@ -2267,3 +2267,9 @@ animation effects	Off	Выкл
 	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже
+# Arrange added text and images (Thai edition).
+	Arrange	Упорядочить
+	Bring to front	На передний план
+	Bring forward	Переместить вперёд
+	Send backward	Переместить назад
+	Send to back	На задний план

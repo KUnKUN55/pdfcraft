@@ -68,6 +68,64 @@ fn texts(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
         .collect()
 }
 
+/// The screen centre of added item `i` on page 1.
+fn item_centre(h: &Harness<'static, PdfCraftApp>, i: usize) -> Pos2 {
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    let (w, ht) = (doc.info.pages[0].width, doc.info.pages[0].height);
+    let r = s.views[0].page_screen_rect(0).expect("on screen");
+    let b = doc.added[i].content.rect();
+    let (cx, cy) = (((b[0] + b[2]) / 2.0) as f32, ht - ((b[1] + b[3]) / 2.0) as f32);
+    r.min + egui::vec2(cx / w * r.width(), cy / ht * r.height())
+}
+
+/// Thai edition: Arrange from the right-click menu and from Ctrl+] / Ctrl+[ reorders overlapping
+/// text boxes, and the selection stays on the box that moved.
+#[test]
+fn overlapping_text_boxes_are_arranged_from_the_menu_and_the_keys() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    for text in ["Under", "Over"] {
+        let added = pdfcraft_engine::AddedText { rect: [40.0, 200.0, 200.0, 230.0], text: text.into(), size: 14.0, ..Default::default() };
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText { page: 0, text: added });
+        h.run_steps(3);
+    }
+    assert_eq!(texts(&h), ["Under", "Over"]);
+    // Right-click the boxes (the top one is hit) and send it to the back.
+    let p = item_centre(&h, 1);
+    h.hover_at(p);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 1)), "the right-click selected the box on top");
+    assert_eq!(h.state().views[0].content.menu, Some((0, 1)), "the menu is for that box");
+    // The submenu button's label carries its arrow.
+    h.get_by_label_contains("Arrange").click();
+    h.run_steps(2);
+    // Its items show their shortcuts too.
+    h.get_by_label_contains("Send to back").click();
+    h.run_steps(6);
+    assert_eq!(texts(&h), ["Over", "Under"]);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)), "the selection follows the box");
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Send to back"));
+    // Ctrl+] brings it forward again; Ctrl+[ sends it back. The key's place counts, not its letter.
+    let key = |h: &mut Harness<'static, PdfCraftApp>, key: egui::Key| {
+        let modifiers = egui::Modifiers::COMMAND;
+        h.event(egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers });
+        h.event(egui::Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers });
+        h.run_steps(6);
+    };
+    key(&mut h, egui::Key::CloseBracket);
+    assert_eq!(texts(&h), ["Under", "Over"]);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 1)));
+    key(&mut h, egui::Key::OpenBracket);
+    assert_eq!(texts(&h), ["Over", "Under"]);
+}
+
 #[test]
 fn clicking_elsewhere_keeps_the_text_and_starts_a_new_box() {
     // #74: a click elsewhere on the page threw away the text being typed and opened a new box.

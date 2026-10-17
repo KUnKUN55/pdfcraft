@@ -5,7 +5,7 @@
 
 use crate::widgets::Tip as _;
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke};
-use pdfcraft_engine::{Added, AddedContent, AddedText, Edit, FontFamily, TextAlign};
+use pdfcraft_engine::{Added, AddedContent, AddedText, Arrange, Edit, FontFamily, TextAlign};
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
@@ -88,6 +88,10 @@ pub struct ContentView {
     pub draft: Option<TextDraft>,
     /// Select the item an add creates (the page's item count before it).
     pub select_added: Option<(usize, usize)>,
+    /// Keep the selection on this item (page, stream) once Arrange has changed its index.
+    pub follow: Option<(usize, pdfcraft_cos::ObjRef)>,
+    /// The item (page, index) the page's right-click menu is for, set by a right-click on it.
+    pub menu: Option<(usize, usize)>,
     grab: Option<(usize, Grab, Pos2)>,
     undrawable: UndrawableMemo,
 }
@@ -210,7 +214,7 @@ impl MoveBackground {
         let r = screen_rect(xf, info, page, from);
         let d = if let Some((_, _, start)) = cv.grab {
             let Some(p) = ui.input(|i| i.pointer.hover_pos()) else { return };
-            p - start
+            snap_to_centre(ui, xf.rect, r, p - start)
         } else if let Some(to) = self.settling {
             // A moved text box keeps its top edge (its height follows its lines).
             screen_rect(xf, info, page, to).left_top() - r.left_top()
@@ -254,6 +258,42 @@ fn on_page(added: &[Added], page: usize) -> Vec<(usize, &Added)> {
 
 fn handles(r: Rect) -> [(Pos2, bool, bool); 4] {
     [(r.left_top(), true, true), (r.right_top(), false, true), (r.left_bottom(), true, false), (r.right_bottom(), false, false)]
+}
+
+/// How close (screen points) a moved box's centre comes to the page's centre line before it
+/// snaps onto it.
+const SNAP: f32 = 6.0;
+
+/// Smart guides (Thai edition), as in Word: the move `d` of a box `r` (screen), adjusted so the
+/// box's centre lands on the page's centre lines when it comes within [`SNAP`] of them. Alt held
+/// moves freely.
+pub(crate) fn snap_to_centre(ui: &egui::Ui, page: Rect, r: Rect, d: egui::Vec2) -> egui::Vec2 {
+    if ui.input(|i| i.modifiers.alt) { d } else { snap_delta(page, r, d) }
+}
+
+/// [`snap_to_centre`] without the Alt key.
+fn snap_delta(page: Rect, r: Rect, d: egui::Vec2) -> egui::Vec2 {
+    let (c, pc) = (r.center() + d, page.center());
+    let mut out = d;
+    if (c.x - pc.x).abs() <= SNAP {
+        out.x += pc.x - c.x;
+    }
+    if (c.y - pc.y).abs() <= SNAP {
+        out.y += pc.y - c.y;
+    }
+    out
+}
+
+/// The page's centre lines a box being moved sits on, drawn across the page in green.
+pub(crate) fn paint_guides(painter: &egui::Painter, page: Rect, r: Rect) {
+    let guide = Stroke::new(1.0, Color32::from_rgb(0x2E, 0xB8, 0x5C));
+    let pc = page.center();
+    if (r.center().x - pc.x).abs() < 0.5 {
+        painter.line_segment([Pos2::new(pc.x, page.top()), Pos2::new(pc.x, page.bottom())], guide);
+    }
+    if (r.center().y - pc.y).abs() < 0.5 {
+        painter.line_segment([Pos2::new(page.left(), pc.y), Pos2::new(page.right(), pc.y)], guide);
+    }
 }
 
 /// The rect while moving or resizing (images keep their proportions).
@@ -313,7 +353,9 @@ pub(crate) fn page_input(
                 && (end - start).length() >= 1.0
             {
                 let keep = matches!(a.content, AddedContent::Image(_));
-                let r = dragged(screen_rect(xf, info, page, a.content.rect()), grab, end - start, keep);
+                let from = screen_rect(xf, info, page, a.content.rect());
+                let d = if grab == Grab::Move { snap_to_centre(ui, xf.rect, from, end - start) } else { end - start };
+                let r = dragged(from, grab, d, keep);
                 let (p0, p1) = (to_display(xf, info, page, r.left_bottom()), to_display(xf, info, page, r.right_top()));
                 let mut rect = [p0[0], p0[1], p1[0], p1[1]];
                 if let AddedContent::Text(t) = &a.content
@@ -335,6 +377,20 @@ pub(crate) fn page_input(
             }
         }
         return consumed;
+    }
+    // A right-click on an item selects it, and the page's menu shows its items (Arrange, Delete;
+    // see [`page_menu`]) (Thai edition).
+    if resp.secondary_clicked()
+        && let Some(p) = pointer.filter(|p| xf.rect.contains(*p))
+    {
+        let hit = on_page(added, page).into_iter().rev().find(|(_, a)| screen_rect(xf, info, page, a.content.rect()).expand(2.0).contains(p));
+        if let Some((i, _)) = hit
+            && cv.draft.is_none()
+        {
+            cv.selected = Some((page, i));
+            cv.menu = Some((page, i));
+            consumed = true;
+        }
     }
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return consumed };
     let items = on_page(added, page);
@@ -419,6 +475,82 @@ pub(crate) fn page_input(
     consumed || hit.is_some() && resp.is_pointer_button_down_on()
 }
 
+/// What the right-click menu of an added item chose.
+enum ItemChoice {
+    Arrange(Arrange),
+    Delete,
+}
+
+/// The Arrange orders with their shortcuts (Word's and PowerPoint's keys).
+const ARRANGE: [(Arrange, &str); 4] =
+    [(Arrange::Front, "Ctrl+Shift+]"), (Arrange::Forward, "Ctrl+]"), (Arrange::Backward, "Ctrl+["), (Arrange::Back, "Ctrl+Shift+[")];
+
+/// The page's right-click menu over an added text box or image (Arrange, Delete): `true` when
+/// it was shown, so the page's other menus are not. Its choice becomes the pending edit.
+pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, added: &[Added]) -> bool {
+    let Some((page, index)) = view.content.menu.filter(|m| view.content.selected == Some(*m) && view.content.draft.is_none()) else {
+        return false;
+    };
+    let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index) else { return false };
+    match item_menu(ui) {
+        Some(ItemChoice::Arrange(how)) => {
+            view.content.follow = Some((page, a.obj));
+            view.pending_edit = Some(Edit::ArrangeContent { page, index, how });
+        }
+        Some(ItemChoice::Delete) => {
+            (view.content.selected, view.content.menu) = (None, None);
+            view.pending_edit = Some(Edit::DeleteContent { page, index });
+        }
+        None => {}
+    }
+    true
+}
+
+/// The right-click menu of an added text box or image: Arrange and Delete.
+fn item_menu(ui: &mut egui::Ui) -> Option<ItemChoice> {
+    let mut chosen = None;
+    ui.menu_button(tl!("Arrange"), |ui| {
+        for (how, keys) in ARRANGE {
+            let label = match how {
+                Arrange::Front => tl!("Bring to front"),
+                Arrange::Forward => tl!("Bring forward"),
+                Arrange::Backward => tl!("Send backward"),
+                Arrange::Back => tl!("Send to back"),
+            };
+            if ui.add(egui::Button::new(label).shortcut_text(keys)).clicked() {
+                chosen = Some(ItemChoice::Arrange(how));
+                ui.close();
+            }
+        }
+    });
+    ui.separator();
+    if ui.button(tl!("Delete")).clicked() {
+        chosen = Some(ItemChoice::Delete);
+        ui.close();
+    }
+    chosen
+}
+
+/// The Arrange order the keys pressed this frame ask for: Ctrl+] forward, Ctrl+[ backward, with
+/// Shift to the front or back. The key's place on the keyboard counts, so it works on a Thai
+/// layout too, where those keys type Thai letters.
+pub(crate) fn arrange_key(ctx: &egui::Context) -> Option<Arrange> {
+    ctx.input(|i| {
+        i.events.iter().find_map(|e| match e {
+            egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } if modifiers.command && !modifiers.alt => {
+                match (physical_key.unwrap_or(*key), modifiers.shift) {
+                    (egui::Key::CloseBracket, false) => Some(Arrange::Forward),
+                    (egui::Key::CloseBracket, true) => Some(Arrange::Front),
+                    (egui::Key::OpenBracket, false) => Some(Arrange::Backward),
+                    (egui::Key::OpenBracket, true) => Some(Arrange::Back),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+    })
+}
+
 /// Outlines of added items (hover and selection with handles) and the box being dragged.
 pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, added: &[Added], view: &DocView) {
     let cv = &view.content;
@@ -433,7 +565,11 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             && let (Some((gp, g, start)), Some(p)) = (cv.grab, pointer)
             && gp == page
         {
-            r = dragged(r, g, p - start, matches!(a.content, AddedContent::Image(_)));
+            let d = if g == Grab::Move { snap_to_centre(ui, xf.rect, r, p - start) } else { p - start };
+            r = dragged(r, g, d, matches!(a.content, AddedContent::Image(_)));
+            if g == Grab::Move {
+                paint_guides(painter, xf.rect, r);
+            }
         }
         if selected
             && cv.grab.is_none()
@@ -462,6 +598,13 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
     let (del, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace), i.key_pressed(egui::Key::Escape)));
     if del && let Some((page, index)) = view.content.selected.take() {
         view.pending_edit = Some(Edit::DeleteContent { page, index });
+    } else if let Some(how) = arrange_key(ctx)
+        && view.pending_edit.is_none()
+        && let Some((page, index)) = view.content.selected
+        && let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index)
+    {
+        view.content.follow = Some((page, a.obj));
+        view.pending_edit = Some(Edit::ArrangeContent { page, index, how });
     } else if esc {
         view.content.selected = None;
     } else if let Some([dx, dy]) = nudge(ctx)
@@ -500,6 +643,12 @@ pub(crate) fn nudge(ctx: &egui::Context) -> Option<[f64; 2]> {
 
 /// After an add: select the new item.
 pub(crate) fn after_refresh(view: &mut DocView, added: &[Added]) {
+    // After Arrange: the same item, at its new index.
+    if let Some((page, obj)) = view.content.follow.take()
+        && let Some((i, _)) = on_page(added, page).into_iter().find(|(_, a)| a.obj == obj)
+    {
+        view.content.selected = Some((page, i));
+    }
     if let Some((page, before)) = view.content.select_added.take()
         && on_page(added, page).len() > before
     {
@@ -1054,4 +1203,28 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
         }
     }
     out
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use egui::{Rect, pos2, vec2};
+
+    use super::{SNAP, snap_delta};
+
+    /// A box moved to within a few points of the page's centre lines lands on them; farther away
+    /// it moves exactly as dragged.
+    #[test]
+    fn a_moved_box_snaps_its_centre_onto_the_page_centre_lines() {
+        let page = Rect::from_min_size(pos2(100.0, 50.0), vec2(600.0, 800.0));
+        let r = Rect::from_min_size(pos2(120.0, 70.0), vec2(100.0, 40.0));
+        // Its centre (170, 90) is dragged to (397, 448): 3 points short of (400, 450) both ways.
+        let d = snap_delta(page, r, vec2(227.0, 358.0));
+        assert_eq!(r.center() + d, page.center());
+        // Only the axis that is close snaps.
+        let d = snap_delta(page, r, vec2(229.0, 100.0));
+        assert_eq!(((r.center() + d).x, (r.center() + d).y), (400.0, 190.0));
+        // Beyond the snapping distance nothing changes.
+        let far = vec2(230.0 - SNAP - 1.0, 100.0);
+        assert_eq!(snap_delta(page, r, far), far);
+    }
 }

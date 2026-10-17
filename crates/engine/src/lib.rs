@@ -50,7 +50,8 @@ pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnific
 pub use pdfcraft_cos::Algorithm;
 pub use pdfcraft_create::{CONVERTIBLE, CreateError, ImageResolution, SourceKind, decode_text, source_kind};
 pub use pdfcraft_edit::{
-    Added, AddedImage, AddedText, Align as TextAlign, Background, Content as AddedContent, Family as FontFamily, HeaderFooter, MarkKind, Watermark,
+    Added, AddedImage, AddedText, Align as TextAlign, Arrange, Background, Content as AddedContent, Family as FontFamily, HeaderFooter, MarkKind,
+    Watermark,
 };
 pub use pdfcraft_forms::{
     BorderStyle, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldFont, FieldKind as FormFieldKind, FieldProps, FieldValue,
@@ -226,6 +227,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::AddImage { .. }
         | Edit::UpdateContent { .. }
         | Edit::DeleteContent { .. }
+        | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::AddHeaderFooter { .. }
         | Edit::AddWatermark { .. }
@@ -1475,6 +1477,12 @@ pub enum Edit {
         page: usize,
         index: usize,
     },
+    /// Move an added item to another layer of its page (Thai edition: Arrange).
+    ArrangeContent {
+        page: usize,
+        index: usize,
+        how: Arrange,
+    },
     /// Replace an added image with another file (keeping its box and transforms).
     ReplaceImage {
         page: usize,
@@ -1849,6 +1857,12 @@ impl Edit {
             Edit::AddImage { .. } => Label::of("Add image"),
             Edit::UpdateContent { .. } => Label::of("Edit content"),
             Edit::DeleteContent { .. } => Label::of("Delete content"),
+            Edit::ArrangeContent { how, .. } => Label::of(match how {
+                Arrange::Front => "Bring to front",
+                Arrange::Forward => "Bring forward",
+                Arrange::Backward => "Send backward",
+                Arrange::Back => "Send to back",
+            }),
             Edit::ReplaceImage { .. } => Label::of("Replace image"),
             Edit::ApplyRedactions { .. } => Label::of("Apply redactions"),
             Edit::ClearRedactions => Label::of("Remove redaction marks"),
@@ -1986,6 +2000,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::UpdateContent { .. }
         | Edit::MoveObjects { .. }
         | Edit::DeleteContent { .. }
+        | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::ClearRedactions
         | Edit::RemoveHidden { .. }
@@ -2389,6 +2404,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::UpdateContent { page, index, content } => pdfcraft_edit::update_content(doc, *page, *index, content)?,
         Edit::DeleteContent { page, index } => pdfcraft_edit::delete_content(doc, *page, *index)?,
+        Edit::ArrangeContent { page, index, how } => {
+            pdfcraft_edit::arrange_content(doc, *page, *index, *how)?;
+        }
         Edit::ReplaceImage { page, index, name, bytes } => {
             let item = pdfcraft_edit::list_added(doc).into_iter().filter(|a| a.page == *page).nth(*index);
             let Some(AddedContent::Image(old)) = item.map(|a| a.content) else {
@@ -3602,7 +3620,12 @@ impl Session {
         let touches_added = edit.is_none_or(|e| {
             matches!(
                 e,
-                Edit::AddText { .. } | Edit::AddImage { .. } | Edit::UpdateContent { .. } | Edit::DeleteContent { .. } | Edit::ReplaceImage { .. }
+                Edit::AddText { .. }
+                    | Edit::AddImage { .. }
+                    | Edit::UpdateContent { .. }
+                    | Edit::DeleteContent { .. }
+                    | Edit::ArrangeContent { .. }
+                    | Edit::ReplaceImage { .. }
             ) || matches!(e, Edit::MoveObjects { objects, .. } if objects.iter().any(|o| o.kind == ObjectKind::Added))
         });
         let touches_marks = edit.is_none_or(|e| {

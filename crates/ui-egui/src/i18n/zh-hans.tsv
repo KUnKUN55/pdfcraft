@@ -2318,3 +2318,9 @@ animation effects	Off	关
 	This document is trying to open a local file:	此文档正尝试打开本地文件：
 	Move tag earlier	将标签前移
 	Move tag later	将标签后移
+# Arrange added text and images (Thai edition).
+	Arrange	排列
+	Bring to front	置于顶层
+	Bring forward	上移一层
+	Send backward	下移一层
+	Send to back	置于底层

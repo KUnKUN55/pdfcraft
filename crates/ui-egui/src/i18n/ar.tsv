@@ -2375,3 +2375,9 @@ animation effects	Off	معطّلة
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+# Arrange added text and images (Thai edition).
+	Arrange	ترتيب
+	Bring to front	إحضار إلى المقدمة
+	Bring forward	إحضار للأمام
+	Send backward	إرسال للخلف
+	Send to back	إرسال إلى الخلفية

@@ -2228,3 +2228,9 @@ animation effects	Off	關
 	This document is trying to open a local file:	此文件正嘗試開啟本機檔案：
 	Move tag earlier	將標記前移
 	Move tag later	將標記後移
+# Arrange added text and images (Thai edition).
+	Arrange	排列
+	Bring to front	移到最上層
+	Bring forward	上移一層
+	Send backward	下移一層
+	Send to back	移到最下層

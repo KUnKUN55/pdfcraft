@@ -2350,3 +2350,9 @@ animation effects	Off	Kapalı
 	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
 	Move tag earlier	Etiketi daha erken taşı
 	Move tag later	Etiketi daha geç taşı
+# Arrange added text and images (Thai edition).
+	Arrange	Düzenle
+	Bring to front	En öne getir
+	Bring forward	Öne getir
+	Send backward	Arkaya gönder
+	Send to back	En arkaya gönder

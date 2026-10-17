@@ -1981,10 +1981,12 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     } else if pressed(cmd(Key::G)) {
         view.find_step(true);
     }
-    if pressed(cmd(Key::OpenBracket)) {
+    // With an added item selected, ⌘[ and ⌘] arrange it instead (Thai edition; content_ui::keys).
+    let arranging = view.content.selected.is_some() && view.content.draft.is_none();
+    if !arranging && pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);
     }
-    if pressed(cmd(Key::CloseBracket)) {
+    if !arranging && pressed(cmd(Key::CloseBracket)) {
         view.view_history(true);
     }
     // With an added item selected the arrow keys move it, not the page.
@@ -2430,8 +2432,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let mut current_height = f32::INFINITY;
         let pointer = ui.input(|i| i.pointer.hover_pos());
         if resp.secondary_clicked() {
-            // Set again below when the right-click lands on a link.
+            // Set again below when the right-click lands on a link (or an added item).
             view.links.context = None;
+            view.content.menu = None;
         }
         for &i in &visible_pages {
             let r = snap_to_pixels(rects[i].translate(origin.to_vec2()), ppp);
@@ -3045,6 +3048,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
         }
         resp.context_menu(|ui| {
+            // An added text box or image right-clicked: Arrange and Delete (Thai edition).
+            if crate::content_ui::page_menu(ui, view, &doc.added) {
+                return;
+            }
             // Preparing a form: the selected field's menu.
             if preparing && let Some((name, wi)) = view.prepare.selected.clone() {
                 // Several fields: Align, Center, Distribute, Set Fields to Same Size.

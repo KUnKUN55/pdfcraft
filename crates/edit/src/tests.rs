@@ -133,6 +133,67 @@ fn header_and_footer_take_the_chosen_font_and_can_be_removed() {
     assert!(add_header_footer(&mut doc, &[0], &greek, false, &cx()).unwrap_err().to_string().contains("U+0395"));
 }
 
+/// Thai edition: Arrange moves an added item between the page's layers, keeping the page's own
+/// content wrapped as one layer and backgrounds at the bottom.
+#[test]
+fn added_items_are_arranged_between_the_page_layers() {
+    let mut doc = fixture();
+    let text = |s: &str| Content::Text(AddedText { rect: [72.0, 600.0, 300.0, 700.0], text: s.into(), ..AddedText::default() });
+    add_content(&mut doc, 0, &text("A")).unwrap();
+    add_content(&mut doc, 0, &text("B")).unwrap();
+    add_background(&mut doc, &[0], &Background::default(), false).unwrap();
+    // What each stream is: the background, the wrapper, the page's own text, or an item.
+    let layers = |doc: &Document| -> Vec<&'static str> {
+        streams(doc, 0)
+            .iter()
+            .map(|s| match s.as_str() {
+                s if s.contains("re f") && !s.contains("Tj") => "bg",
+                "q %PdfCraft\n" => "q",
+                "Q %PdfCraft\n" => "Q",
+                s if s.contains("(Hi) Tj") => "page",
+                s if s.contains("(A) Tj") => "A",
+                s if s.contains("(B) Tj") => "B",
+                _ => "?",
+            })
+            .collect()
+    };
+    let names = |doc: &Document| {
+        list_added(doc)
+            .iter()
+            .map(|a| match &a.content {
+                Content::Text(t) => t.text.clone(),
+                Content::Image(_) => String::new(),
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(layers(&doc), ["bg", "q", "page", "Q", "A", "B"]);
+    assert_eq!(arrange_content(&mut doc, 0, 0, Arrange::Front).unwrap(), 1);
+    assert_eq!(layers(&doc), ["bg", "q", "page", "Q", "B", "A"]);
+    assert_eq!(names(&doc), ["B", "A"]);
+    let err = arrange_content(&mut doc, 0, 1, Arrange::Forward).unwrap_err();
+    assert!(err.to_string().contains("already in front"), "{err}");
+    // Behind the page's own content, but never behind the background.
+    assert_eq!(arrange_content(&mut doc, 0, 1, Arrange::Back).unwrap(), 0);
+    assert_eq!(layers(&doc), ["bg", "A", "q", "page", "Q", "B"]);
+    assert!(arrange_content(&mut doc, 0, 0, Arrange::Backward).unwrap_err().to_string().contains("already behind"));
+    // Behind the page, the item is still selected and moved by Edit text & images.
+    let before = editable_objects(&doc, 0).unwrap();
+    let a = before.iter().find(|o| o.text.as_deref() == Some("A")).unwrap().clone();
+    move_objects(&mut doc, 0, &[a.target], [10.0, 0.0]).unwrap();
+    let after = editable_objects(&doc, 0).unwrap();
+    let moved = after.iter().find(|o| o.text.as_deref() == Some("A")).unwrap();
+    assert!((moved.rect[0] - a.rect[0] - 10.0).abs() < 0.01, "{:?} -> {:?}", a.rect, moved.rect);
+    assert_eq!(layers(&doc), ["bg", "A", "q", "page", "Q", "B"]);
+    assert_eq!(arrange_content(&mut doc, 0, 0, Arrange::Forward).unwrap(), 0);
+    assert_eq!(layers(&doc), ["bg", "q", "page", "Q", "A", "B"]);
+    assert_eq!(arrange_content(&mut doc, 0, 1, Arrange::Backward).unwrap(), 0);
+    assert_eq!(layers(&doc), ["bg", "q", "page", "Q", "B", "A"]);
+    // Each item keeps its place, size and look, and the file still opens.
+    let doc = reopen(&doc);
+    assert_eq!(list_added(&doc).len(), 2);
+    assert!(arrange_content(&mut doc.clone(), 0, 5, Arrange::Front).is_err(), "no such item");
+}
+
 #[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page

@@ -1288,6 +1288,106 @@ pub fn delete_content(doc: &mut Document, page: usize, index: usize) -> Result<(
     Ok(())
 }
 
+/// Where an added item goes among the page's layers (Acrobat's and Word's Arrange).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arrange {
+    /// In front of everything on the page.
+    Front,
+    /// One layer up.
+    Forward,
+    /// One layer down.
+    Backward,
+    /// Behind everything on the page, the page's own content included, but in front of
+    /// backgrounds (and watermarks set behind the page), which would otherwise hide it.
+    Back,
+}
+
+/// Move added item `index` of `page` to another layer (Thai edition). The layers are the page's
+/// own content (one layer, wrapped in q/Q), each added item, and each header, footer, watermark
+/// or other stream PdfCraft drew on top, in drawing order; backgrounds and marks set behind the
+/// page stay at the bottom. Items keep their own graphics state (each is q … Q), so reordering
+/// streams changes nothing but which is drawn last. Returns the item's new index among the
+/// page's added items.
+pub fn arrange_content(doc: &mut Document, page: usize, index: usize, how: Arrange) -> Result<usize, EditError> {
+    let a = find(doc, page, index)?;
+    let p = page_list(doc).swap_remove(page);
+    let list = contents(doc, &p)?;
+    let is_mark = |o: &Object| matches!(crate::stream_tag(doc, o).as_deref(), Some("HeaderFooter" | "Watermark" | "Background"));
+    // Marks drawn behind the page come first and stay there.
+    let lead = list.iter().take_while(|o| is_mark(o)).count();
+    let (bottom, rest) = list.split_at(lead);
+    let mut layers: Vec<Vec<Object>> = Vec::new();
+    let mut in_wrap = false;
+    for o in rest {
+        let tag = crate::stream_tag(doc, o);
+        match tag.as_deref() {
+            // The wrapper and the page content inside it are one layer.
+            Some("Wrap") => {
+                if in_wrap {
+                    if let Some(last) = layers.last_mut() {
+                        last.push(o.clone());
+                    }
+                } else {
+                    layers.push(vec![o.clone()]);
+                }
+                in_wrap = !in_wrap;
+            }
+            _ if in_wrap => {
+                if let Some(last) = layers.last_mut() {
+                    last.push(o.clone());
+                }
+            }
+            // Unwrapped page content: consecutive untagged streams are one layer.
+            None if layers.last().and_then(|l| l.last()).is_some_and(|prev| crate::stream_tag(doc, prev).is_none()) => {
+                if let Some(last) = layers.last_mut() {
+                    last.push(o.clone());
+                }
+            }
+            _ => layers.push(vec![o.clone()]),
+        }
+    }
+    let at = layers
+        .iter()
+        .position(|l| l.len() == 1 && l.first().and_then(Object::as_ref) == Some(a.obj))
+        .ok_or_else(|| EditError::Invalid("the item is not one of the page's layers".into()))?;
+    let last = layers.len().saturating_sub(1);
+    let to = match how {
+        Arrange::Front => last,
+        Arrange::Forward => (at + 1).min(last),
+        Arrange::Backward => at.saturating_sub(1),
+        Arrange::Back => 0,
+    };
+    if to == at {
+        return Err(EditError::Invalid(
+            match how {
+                Arrange::Front | Arrange::Forward => "the item is already in front of everything on the page",
+                Arrange::Back | Arrange::Backward => "the item is already behind everything on the page",
+            }
+            .into(),
+        ));
+    }
+    let layer = layers.remove(at);
+    layers.insert(to, layer);
+    // Page content not yet wrapped could leave its graphics state to whatever is drawn after it:
+    // wrap it, as drawing on top does.
+    for l in layers.iter_mut() {
+        if l.first().is_some_and(|o| crate::stream_tag(doc, o).is_none()) {
+            let open = Object::Ref(doc.add(Object::Stream(Stream::from_raw(crate::tagged("Wrap"), crate::WRAP_OPEN.to_vec()))));
+            let close = Object::Ref(doc.add(Object::Stream(Stream::from_raw(crate::tagged("Wrap"), crate::WRAP_CLOSE.to_vec()))));
+            l.insert(0, open);
+            l.push(close);
+        }
+    }
+    let mut order: Vec<Object> = bottom.to_vec();
+    order.extend(layers.into_iter().flatten());
+    doc.update_dict(p.obj, |d| d.set(b"Contents".to_vec(), Object::Array(order)))?;
+    list_added(doc)
+        .into_iter()
+        .filter(|x| x.page == page)
+        .position(|x| x.obj == a.obj)
+        .ok_or_else(|| EditError::Invalid("the item was lost while arranging".into()))
+}
+
 /// The Type 3 fonts an Arabic item's stream shows text with. Each item has its own (`draw_shaped`
 /// names them so), so they go when the item is replaced or deleted.
 fn own_fonts(doc: &Document, obj: ObjRef) -> Vec<Vec<u8>> {
