@@ -2832,9 +2832,20 @@ impl PdfCraftApp {
             return;
         }
         let Some(id) = self.views.get(i).map(|v| v.id) else { return };
-        if let Some((page, index)) = self.views.get(i).and_then(|v| v.comments.selected)
+        // With Add text or Edit text & images, what those tools selected is copied: a comment
+        // selected before switching to them stays selected, and must not be copied instead
+        // (Thai edition).
+        let editing_tool = matches!(self.quick_tool, QuickTool::AddText | QuickTool::EditText);
+        if !editing_tool
+            && let Some((page, index)) = self.views.get(i).and_then(|v| v.comments.selected)
             && self.copy_comment(i, page, index, ctx)
         {
+            return;
+        }
+        // A picture of the page itself (Edit text & images): its pixels to the clipboard, which
+        // ⌘V pastes as an added picture.
+        if editing_tool && let Some((page, index)) = self.page_image_to_copy(i) {
+            self.copy_page_image(page, index);
             return;
         }
         if let Some(clip) = self.image_to_copy(i) {
@@ -2954,6 +2965,19 @@ impl PdfCraftApp {
                 self.views[i].comments.selected = Some((to_page, newest));
             }
         }
+    }
+
+    /// The page's own picture selected in Edit text & images, to copy: (page, index).
+    fn page_image_to_copy(&self, i: usize) -> Option<(usize, usize)> {
+        let view = self.views.get(i)?;
+        if view.content.selected.is_some() || view.content.draft.is_some() {
+            return None;
+        }
+        if let Some(s) = view.image_selection.as_ref() {
+            return Some((s.page, s.index));
+        }
+        let (page, target) = view.objects.single_selected()?;
+        (target.kind == pdfcraft_engine::ObjectKind::Image).then_some((page, target.index))
     }
 
     /// The selected added picture in Edit a PDF, to copy.

@@ -354,6 +354,54 @@ fn added_pictures_are_copied_and_pasted() {
     assert_eq!(images(&h, 1).len(), 1, "pasted on page 2");
 }
 
+/// Thai edition: in Edit text & images, ⌘C copies what that tool selected even while a comment
+/// selected earlier with the Select tool is still selected; a click on empty page space goes
+/// back to the Select tool.
+#[test]
+fn edit_text_copies_its_own_selection_and_a_click_on_empty_space_selects() {
+    let mut h = harness_bytes(TWO_PAGES.to_vec());
+    let comment = pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape: pdfcraft_engine::Shape::Rectangle { rect: [40.0, 40.0, 120.0, 90.0] },
+        style: Default::default(),
+        contents: "old comment".into(),
+        author: "Now".into(),
+    };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(comment));
+    let text = pdfcraft_engine::AddedText { rect: [40.0, 300.0, 200.0, 330.0], text: "New box".into(), size: 14.0, ..Default::default() };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText { page: 0, text });
+    h.run_steps(4);
+    let index = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().info.annotations[0].index
+    };
+    // The comment, selected and copied with the Select tool.
+    h.state_mut().views[0].comments.selected = Some((0, index));
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    assert!(h.state().comment_clip.is_some());
+    // Edit text & images: the text box selected there is what ⌘C copies now.
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    assert_eq!(h.state().quick_tool, QuickTool::EditText);
+    h.state_mut().views[0].content.selected = Some((0, 0));
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    assert_eq!(h.state().text_clipboard.as_ref().map(|c| c.text.text.clone()).as_deref(), Some("New box"));
+    // A click on empty page space: back to Select.
+    for _ in 0..60 {
+        h.run_steps(2);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.state_mut().views[0].content.selected = None;
+    let empty = h.state().views[0].page_screen_rect(0).unwrap().center();
+    click(&mut h, empty);
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+}
+
 #[test]
 fn clicking_elsewhere_keeps_the_text_and_starts_a_new_box() {
     // #74: a click elsewhere on the page threw away the text being typed and opened a new box.

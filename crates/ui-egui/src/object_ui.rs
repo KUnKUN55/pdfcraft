@@ -22,6 +22,8 @@ pub(crate) struct ObjectSelection {
     pending: Option<Vec<EditableObject>>,
     pub notice: Option<String>,
     pub hold_editor: bool,
+    /// A plain click on empty page space: back to the Select tool (Thai edition).
+    pub leave_tool: bool,
     blocked_page: Option<usize>,
     input_blocked: bool,
 }
@@ -296,6 +298,11 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
             s.gesture = None;
             if gesture.marquee {
                 let area = Rect::from_two_pos(gesture.start, gesture.now).intersect(xf.rect);
+                // A click (not an area dragged) on empty page space leaves Edit text & images for
+                // the Select tool, as the user asked (Thai edition).
+                if !gesture.additive && gesture.start.distance(gesture.now) <= DRAG_SLOP {
+                    s.leave_tool = true;
+                }
                 if !gesture.additive {
                     s.selected.clear();
                 }
