@@ -56,7 +56,7 @@ rustix = { version = "1", features = ["fs"] }
 # Auto interface language: the Windows display language, without starting a process.
 sys-locale = "0.3"
 # Region ▸ Measurement system for the default Units, read from the registry without starting reg.exe.
-winsafe = { version = "0.0.29", default-features = false, features = ["advapi"] }
+winsafe = { version = "0.0.29", default-features = false, features = ["advapi", "user"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rfd = { workspace = true, features = ["file-handle-inner"] }

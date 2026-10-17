@@ -126,6 +126,61 @@ fn overlapping_text_boxes_are_arranged_from_the_menu_and_the_keys() {
     assert_eq!(texts(&h), ["Over", "Under"]);
 }
 
+/// Thai edition: a comment drawn over text is placed on the page from its right-click menu, and
+/// then goes behind the text with Send to back.
+#[test]
+fn a_comment_placed_on_the_page_goes_behind_text() {
+    let mut h = harness();
+    let rect = [40.0, 180.0, 200.0, 250.0];
+    let comment = pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape: pdfcraft_engine::Shape::Rectangle { rect },
+        style: pdfcraft_engine::Style { fill: Some([1.0, 1.0, 1.0]), ..Default::default() },
+        contents: String::new(),
+        author: "Now".into(),
+    };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(comment));
+    h.run_steps(3);
+    let text = pdfcraft_engine::AddedText { rect: [50.0, 200.0, 190.0, 230.0], text: "Over".into(), size: 14.0, ..Default::default() };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText { page: 0, text });
+    h.run_steps(3);
+    let comments = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().info.annotations.len()
+    };
+    assert_eq!(comments(&h), 1);
+    // Right-click the comment's corner (outside the text box), with the Select tool.
+    h.state_mut().quick_tool = QuickTool::Select;
+    h.run_steps(2);
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let (w, ht) = (doc.info.pages[0].width, doc.info.pages[0].height);
+        let r = s.views[0].page_screen_rect(0).unwrap();
+        r.min + egui::vec2(45.0 / w * r.width(), (ht - 245.0) / ht * r.height())
+    };
+    h.hover_at(p);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(3);
+    h.get_by_label("Place on the page").click();
+    h.run_steps(6);
+    assert_eq!(comments(&h), 0, "no longer a comment");
+    assert_eq!(texts(&h), ["Over"]);
+    assert_eq!(added(&h).len(), 2);
+    assert!(matches!(added(&h)[1].content, pdfcraft_engine::AddedContent::Image(_)), "the comment is now the picture on top");
+    let undo = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().can_undo().map(str::to_owned)
+    };
+    assert_eq!(undo.as_deref(), Some("Place on the page"));
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::ArrangeContent { page: 0, index: 1, how: pdfcraft_engine::Arrange::Back });
+    h.run_steps(3);
+    assert!(matches!(added(&h)[0].content, pdfcraft_engine::AddedContent::Image(_)), "the picture is behind the text now");
+}
+
 #[test]
 fn clicking_elsewhere_keeps_the_text_and_starts_a_new_box() {
     // #74: a click elsewhere on the page threw away the text being typed and opened a new box.

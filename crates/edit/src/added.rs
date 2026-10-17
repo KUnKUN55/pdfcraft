@@ -938,7 +938,8 @@ fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing:
             out.extend_from_slice(b"ET\n");
         }
         Content::Image(i) => {
-            if !matches!(&*doc.get(i.image), Object::Stream(s) if s.dict.name(b"Subtype") == Some(b"Image")) {
+            // A form: a comment placed on the page (`comment_to_content`), drawn into the same unit square.
+            if !matches!(&*doc.get(i.image), Object::Stream(s) if matches!(s.dict.name(b"Subtype"), Some(b"Image" | b"Form"))) {
                 return Err(EditError::Invalid("not an image".into()));
             }
             let r = norm(i.rect);
@@ -1288,19 +1289,10 @@ pub fn delete_content(doc: &mut Document, page: usize, index: usize) -> Result<(
     Ok(())
 }
 
-/// Where an added item goes among the page's layers (Acrobat's and Word's Arrange).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Arrange {
-    /// In front of everything on the page.
-    Front,
-    /// One layer up.
-    Forward,
-    /// One layer down.
-    Backward,
-    /// Behind everything on the page, the page's own content included, but in front of
-    /// backgrounds (and watermarks set behind the page), which would otherwise hide it.
-    Back,
-}
+/// Where an item goes among the page's layers (Thai edition). For an added item, `Back` puts it
+/// behind everything on the page, the page's own content included, but in front of backgrounds
+/// (and watermarks set behind the page), which would otherwise hide it.
+pub use pdfcraft_annot::Arrange;
 
 /// Move added item `index` of `page` to another layer (Thai edition). The layers are the page's
 /// own content (one layer, wrapped in q/Q), each added item, and each header, footer, watermark
@@ -1312,40 +1304,8 @@ pub fn arrange_content(doc: &mut Document, page: usize, index: usize, how: Arran
     let a = find(doc, page, index)?;
     let p = page_list(doc).swap_remove(page);
     let list = contents(doc, &p)?;
-    let is_mark = |o: &Object| matches!(crate::stream_tag(doc, o).as_deref(), Some("HeaderFooter" | "Watermark" | "Background"));
-    // Marks drawn behind the page come first and stay there.
-    let lead = list.iter().take_while(|o| is_mark(o)).count();
-    let (bottom, rest) = list.split_at(lead);
-    let mut layers: Vec<Vec<Object>> = Vec::new();
-    let mut in_wrap = false;
-    for o in rest {
-        let tag = crate::stream_tag(doc, o);
-        match tag.as_deref() {
-            // The wrapper and the page content inside it are one layer.
-            Some("Wrap") => {
-                if in_wrap {
-                    if let Some(last) = layers.last_mut() {
-                        last.push(o.clone());
-                    }
-                } else {
-                    layers.push(vec![o.clone()]);
-                }
-                in_wrap = !in_wrap;
-            }
-            _ if in_wrap => {
-                if let Some(last) = layers.last_mut() {
-                    last.push(o.clone());
-                }
-            }
-            // Unwrapped page content: consecutive untagged streams are one layer.
-            None if layers.last().and_then(|l| l.last()).is_some_and(|prev| crate::stream_tag(doc, prev).is_none()) => {
-                if let Some(last) = layers.last_mut() {
-                    last.push(o.clone());
-                }
-            }
-            _ => layers.push(vec![o.clone()]),
-        }
-    }
+    let (lead, mut layers) = layers_of(doc, &list);
+    let bottom = list.get(..lead).unwrap_or_default();
     let at = layers
         .iter()
         .position(|l| l.len() == 1 && l.first().and_then(Object::as_ref) == Some(a.obj))
@@ -1386,6 +1346,60 @@ pub fn arrange_content(doc: &mut Document, page: usize, index: usize, how: Arran
         .filter(|x| x.page == page)
         .position(|x| x.obj == a.obj)
         .ok_or_else(|| EditError::Invalid("the item was lost while arranging".into()))
+}
+
+/// A page's content entries as layers: how many marks drawn behind the page lead (they stay at the
+/// bottom), then the page's own content (one layer, with its q/Q wrapper), each added item, and
+/// each mark drawn on top, in drawing order.
+fn layers_of(doc: &Document, list: &[Object]) -> (usize, Vec<Vec<Object>>) {
+    let is_mark = |o: &Object| matches!(crate::stream_tag(doc, o).as_deref(), Some("HeaderFooter" | "Watermark" | "Background"));
+    let lead = list.iter().take_while(|o| is_mark(o)).count();
+    let mut layers: Vec<Vec<Object>> = Vec::new();
+    let mut in_wrap = false;
+    for o in list.iter().skip(lead) {
+        let tag = crate::stream_tag(doc, o);
+        match tag.as_deref() {
+            // The wrapper and the page content inside it are one layer.
+            Some("Wrap") => {
+                if in_wrap {
+                    if let Some(last) = layers.last_mut() {
+                        last.push(o.clone());
+                    }
+                } else {
+                    layers.push(vec![o.clone()]);
+                }
+                in_wrap = !in_wrap;
+            }
+            _ if in_wrap => {
+                if let Some(last) = layers.last_mut() {
+                    last.push(o.clone());
+                }
+            }
+            // Unwrapped page content: consecutive untagged streams are one layer.
+            None if layers.last().and_then(|l| l.last()).is_some_and(|prev| crate::stream_tag(doc, prev).is_none()) => {
+                if let Some(last) = layers.last_mut() {
+                    last.push(o.clone());
+                }
+            }
+            _ => layers.push(vec![o.clone()]),
+        }
+    }
+    (lead, layers)
+}
+
+/// Where added item `index` of `page` is among the page's layers ([`arrange_content`]): its layer
+/// and how many there are, so a menu can offer only the moves that change something.
+pub fn added_layer(doc: &Document, page: usize, index: usize) -> Option<(usize, usize)> {
+    let a = find(doc, page, index).ok()?;
+    let p = page_list(doc).into_iter().nth(page)?;
+    let list = match p.dict.get(b"Contents").map(|c| (c, doc.resolve(c))) {
+        Some((_, resolved)) if resolved.as_array().is_some() => resolved.as_array().cloned().unwrap_or_default(),
+        Some((c, _)) => vec![c.clone()],
+        None => return None,
+    };
+    let (_, layers) = layers_of(doc, &list);
+    let at = layers.iter().position(|l| l.len() == 1 && l.first().and_then(Object::as_ref) == Some(a.obj))?;
+    Some((at, layers.len()))
 }
 
 /// The Type 3 fonts an Arabic item's stream shows text with. Each item has its own (`draw_shaped`

@@ -2340,3 +2340,8 @@ animation effects	Off	Wyłączone
 	Bring forward	Przesuń do przodu
 	Send backward	Przesuń do tyłu
 	Send to back	Przesuń na spód
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Umieść na stronie
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Komentarze są zawsze przed tekstem i obrazami strony. Umieszczony na stronie, ten komentarz staje się obrazem, który można przesuwać, skalować i przesuwać do tyłu; nie jest już komentarzem.
+	Pasted image	Wklejony obraz
+	Couldn't paste the image: {e}	Nie można wkleić obrazu: {e}

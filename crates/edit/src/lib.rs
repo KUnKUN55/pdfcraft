@@ -796,7 +796,7 @@ pub mod objects;
 pub use objects::{EditableObject, MAX_MOVE_OBJECTS, ObjectKind, ObjectTarget, editable_objects, move_objects};
 
 mod flatten;
-pub use flatten::{flatten, flatten_fill_sign};
+pub use flatten::{comment_to_content, flatten, flatten_fill_sign};
 pub mod images;
 pub use images::{ImageChange, PageImage, change_image, page_images, reading_images, rect_to_rect, turn_about_centre};
 pub mod bidi;
@@ -808,8 +808,8 @@ pub use text::{
 };
 pub mod added;
 pub use added::{
-    Added, AddedImage, AddedText, Align, Arrange, Content, Family, MarkerScan, add_content, arrange_content, delete_content, first_undrawable,
-    fitted_text, list_added, scan_markers, text_is_wrapped, update_content,
+    Added, AddedImage, AddedText, Align, Arrange, Content, Family, MarkerScan, add_content, added_layer, arrange_content, delete_content,
+    first_undrawable, fitted_text, list_added, scan_markers, text_is_wrapped, update_content,
 };
 
 #[cfg(test)]

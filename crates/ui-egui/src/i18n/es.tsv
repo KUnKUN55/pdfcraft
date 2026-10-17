@@ -2490,3 +2490,8 @@ animation effects	Off	Desactivados
 	Bring forward	Traer adelante
 	Send backward	Enviar atrás
 	Send to back	Enviar al fondo
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Colocar en la página
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Los comentarios siempre están delante del texto y las imágenes de la página. Colocado en la página, este se convierte en una imagen que puede mover, redimensionar y enviar detrás; deja de ser un comentario.
+	Pasted image	Imagen pegada
+	Couldn't paste the image: {e}	No se pudo pegar la imagen: {e}

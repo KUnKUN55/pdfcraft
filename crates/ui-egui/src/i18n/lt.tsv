@@ -2604,3 +2604,8 @@ key	Space	Tarpas
 	Bring forward	Perkelti pirmyn
 	Send backward	Perkelti atgal
 	Send to back	Nustumti į galą
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Padėti puslapyje
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Komentarai visada yra prieš puslapio tekstą ir paveikslėlius. Padėtas puslapyje šis komentaras tampa paveikslėliu, kurį galite perkelti, keisti jo dydį ir nustumti atgal; jis nebėra komentaras.
+	Pasted image	Įklijuotas paveikslėlis
+	Couldn't paste the image: {e}	Nepavyko įklijuoti paveikslėlio: {e}

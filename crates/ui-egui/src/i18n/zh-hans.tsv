@@ -2324,3 +2324,8 @@ animation effects	Off	关
 	Bring forward	上移一层
 	Send backward	下移一层
 	Send to back	置于底层
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	放到页面上
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	注释始终位于页面文字和图像的前面。放到页面上后，此注释将变为可以移动、调整大小并置于底层的图片，不再是注释。
+	Pasted image	粘贴的图像
+	Couldn't paste the image: {e}	无法粘贴图像：{e}

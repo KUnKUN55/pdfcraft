@@ -2273,3 +2273,8 @@ animation effects	Off	ఆఫ్
 	Bring forward	ఒక స్థాయి ముందుకు
 	Send backward	ఒక స్థాయి వెనుకకు
 	Send to back	అన్నిటికంటే వెనుకకు పంపు
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	పేజీపై ఉంచు
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	వ్యాఖ్యలు ఎల్లప్పుడూ పేజీలోని వచనం మరియు చిత్రాల ముందే ఉంటాయి. పేజీపై ఉంచితే, ఇది మీరు కదిలించగల, పరిమాణం మార్చగల మరియు వెనుకకు పంపగల చిత్రంగా మారుతుంది; ఇకపై ఇది వ్యాఖ్య కాదు.
+	Pasted image	అతికించిన చిత్రం
+	Couldn't paste the image: {e}	చిత్రాన్ని అతికించలేకపోయాం: {e}

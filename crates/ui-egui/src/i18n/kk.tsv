@@ -2358,3 +2358,8 @@ animation effects	Off	Өшірулі
 	Bring forward	Бір деңгей алға
 	Send backward	Бір деңгей артқа
 	Send to back	Артқы жоспарға жіберу
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Бетке орналастыру
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Түсініктемелер әрқашан беттің мәтіні мен суреттерінің алдында болады. Бетке орналастырылғанда бұл түсініктеме жылжытуға, өлшемін өзгертуге және артқа жіберуге болатын суретке айналады; ол енді түсініктеме емес.
+	Pasted image	Қойылған сурет
+	Couldn't paste the image: {e}	Суретті қою мүмкін болмады: {e}

@@ -2700,6 +2700,57 @@ impl PdfCraftApp {
     }
 }
 
+/// Whether ⌘V was pressed this frame while the clipboard holds no text: egui then sends no
+/// Paste (and no key event), so Windows' own record of the V key tells (its toggle bit flips on
+/// each press). Elsewhere a picture is pasted from Create ▸ Clipboard.
+#[cfg(windows)]
+fn image_paste_key(ctx: &egui::Context) -> bool {
+    use winsafe::co::VK;
+    if ctx.egui_wants_keyboard_input() {
+        return false;
+    }
+    let (_, toggled) = winsafe::GetKeyState(VK::CHAR_V);
+    let (ctrl, _) = winsafe::GetKeyState(VK::CONTROL);
+    let id = egui::Id::new("image-paste-v-toggle");
+    let before = ctx.data(|d| d.get_temp::<bool>(id));
+    ctx.data_mut(|d| d.insert_temp(id, toggled));
+    before.is_some_and(|b| b != toggled) && (ctrl || ctx.input(|i| i.modifiers.command))
+}
+
+#[cfg(not(windows))]
+fn image_paste_key(_ctx: &egui::Context) -> bool {
+    false
+}
+
+/// The picture on the system clipboard, as a file to add: pixels (as PNG), or the first image
+/// file copied in a file manager. `None` when there is none.
+#[cfg(not(target_arch = "wasm32"))]
+fn clipboard_picture() -> Option<Result<(String, Vec<u8>), String>> {
+    /// A pasted file larger than this is refused rather than read.
+    const MAX_FILE: u64 = 64 << 20;
+    let mut cb = arboard::Clipboard::new().ok()?;
+    if let Ok(img) = cb.get_image() {
+        return Some(crate::create_ui::png_from_rgba(img.width, img.height, &img.bytes).map(|png| (tl!("Pasted image").to_string() + ".png", png)));
+    }
+    let files = cb.get().file_list().ok()?;
+    let path = files.into_iter().find(|p| {
+        p.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp"))
+    })?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Some(match std::fs::metadata(&path) {
+        Ok(m) if m.len() > MAX_FILE => Err(format!("{name} is larger than 64 MB")),
+        Ok(_) => std::fs::read(&path).map(|bytes| (name, bytes)).map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clipboard_picture() -> Option<Result<(String, Vec<u8>), String>> {
+    None
+}
+
 /// Why nothing can be copied out of the document: its security doesn't allow it (Table 22,
 /// bit 5; #568).
 pub(crate) fn copy_refused() -> &'static str {
@@ -2736,6 +2787,9 @@ impl PdfCraftApp {
         }
         if let Some(text) = paste {
             self.paste_text_box(i, &text);
+        } else if self.dialog.is_none() && !self.palette_open && image_paste_key(ctx) {
+            // ⌘V with a picture on the clipboard (Thai edition): egui sends no Paste for one.
+            self.paste_image(i);
         }
         if !copy {
             return;
@@ -2790,6 +2844,21 @@ impl PdfCraftApp {
                 Some(TextClip { text, page, pastes: 0 })
             }
             _ => None,
+        }
+    }
+
+    /// ⌘V with a picture on the clipboard (Copy Image here or in another program, or an image file
+    /// copied in File Explorer): it is added to the current page as an image, selected, with the
+    /// Edit a PDF panel open (Thai edition).
+    fn paste_image(&mut self, i: usize) {
+        let Some(view) = self.views.get(i) else { return };
+        if view.content.draft.is_some() || view.line_editor.is_some() {
+            return;
+        }
+        match clipboard_picture() {
+            Some(Ok((name, bytes))) => self.add_image(name, bytes),
+            Some(Err(e)) => self.notify_fmt("Couldn't paste the image: {e}", &[("e", &e)]),
+            None => {}
         }
     }
 

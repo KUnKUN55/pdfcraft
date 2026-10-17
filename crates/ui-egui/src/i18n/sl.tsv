@@ -2365,3 +2365,8 @@ animation effects	Off	Izklopljeni
 	Bring forward	Pomakni naprej
 	Send backward	Pomakni nazaj
 	Send to back	Postavi v ozadje
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Postavi na stran
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Komentarji so vedno pred besedilom in slikami strani. Ko ga postavite na stran, ta komentar postane slika, ki jo lahko premikate, ji spreminjate velikost in jo pošljete v ozadje; ni več komentar.
+	Pasted image	Prilepljena slika
+	Couldn't paste the image: {e}	Slike ni bilo mogoče prilepiti: {e}

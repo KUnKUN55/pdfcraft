@@ -194,6 +194,78 @@ fn added_items_are_arranged_between_the_page_layers() {
     assert!(arrange_content(&mut doc.clone(), 0, 5, Arrange::Front).is_err(), "no such item");
 }
 
+/// Thai edition: comments are arranged among themselves, and one placed on the page becomes an
+/// added item that goes behind added text.
+#[test]
+fn comments_are_arranged_and_placed_on_the_page_behind_text() {
+    use pdfcraft_annot::{Meta, NewAnnotation, Shape, Style, add_annotation};
+    let mut doc = fixture();
+    let square = |doc: &mut Document, x: f64, id: &str| {
+        let new = NewAnnotation {
+            page: 0,
+            shape: Shape::Rectangle { rect: [x, 600.0, x + 100.0, 700.0] },
+            style: Style { fill: Some([1.0, 1.0, 1.0]), ..Style::default() },
+            contents: String::new(),
+            author: "Now".into(),
+        };
+        add_annotation(doc, &new, &Meta { id: id.into(), ..Meta::default() }).unwrap()
+    };
+    let a = square(&mut doc, 72.0, "a");
+    let b = square(&mut doc, 100.0, "b");
+    assert_eq!((a, b), (0, 1));
+    let names = |doc: &Document| -> Vec<String> {
+        let p = &pdfcraft_model::pages(doc)[0];
+        let list = doc.resolve(p.dict.get(b"Annots").unwrap()).as_array().cloned().unwrap();
+        list.iter()
+            .map(|e| doc.resolve(e).as_dict().unwrap().get(b"NM").and_then(|n| n.as_string()).map(|s| s.to_text()).unwrap_or_default())
+            .collect()
+    };
+    assert_eq!(names(&doc), ["a", "b"]);
+    assert_eq!(pdfcraft_annot::arrange_annotation(&mut doc, 0, 0, Arrange::Front).unwrap(), 1);
+    assert_eq!(names(&doc), ["b", "a"]);
+    assert!(pdfcraft_annot::arrange_annotation(&mut doc, 0, 1, Arrange::Forward).is_err(), "already in front");
+    // Text added on the page: comments still cover it until one is placed on the page.
+    let text = Content::Text(AddedText { rect: [80.0, 640.0, 300.0, 680.0], text: "Over".into(), ..AddedText::default() });
+    add_content(&mut doc, 0, &text).unwrap();
+    let at = comment_to_content(&mut doc, 0, 1).unwrap();
+    assert_eq!(names(&doc), ["b"], "the comment is no longer a comment");
+    assert_eq!(at, 1, "it is the newest item, on top");
+    let added = list_added(&doc);
+    let Content::Image(img) = &added[1].content else { panic!("placed as a picture") };
+    assert!((img.rect[0] - 72.0).abs() < 0.01 && (img.rect[3] - 700.0).abs() < 0.01, "{:?}", img.rect);
+    // It draws its appearance, a form, into its box.
+    let s = streams(&doc, 0);
+    assert!(s.last().unwrap().contains(" Do"), "{s:?}");
+    // Sent to the back, the text is drawn over it.
+    assert_eq!(arrange_content(&mut doc, 0, 1, Arrange::Back).unwrap(), 0);
+    let names_of = |doc: &Document| -> Vec<String> {
+        list_added(doc)
+            .iter()
+            .map(|a| match &a.content {
+                Content::Text(t) => t.text.clone(),
+                Content::Image(_) => "picture".into(),
+            })
+            .collect()
+    };
+    assert_eq!(names_of(&doc), ["picture", "Over"]);
+    assert_eq!(added_layer(&doc, 0, 0), Some((0, 3)), "behind the page's own content and the text");
+    let doc = reopen(&doc);
+    assert_eq!(list_added(&doc).len(), 2);
+}
+
+#[test]
+fn arranged_positions_move_one_layer_or_to_either_end() {
+    use pdfcraft_annot::arranged_position as at;
+    let layers = [0, 2, 5];
+    assert_eq!(at(&layers, 2, Arrange::Front), Some(5));
+    assert_eq!(at(&layers, 2, Arrange::Back), Some(0));
+    assert_eq!(at(&layers, 0, Arrange::Forward), Some(2));
+    assert_eq!(at(&layers, 5, Arrange::Backward), Some(2));
+    assert_eq!(at(&layers, 5, Arrange::Front), None);
+    assert_eq!(at(&layers, 0, Arrange::Backward), None);
+    assert_eq!(at(&layers, 3, Arrange::Front), None, "not a layer");
+}
+
 #[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page

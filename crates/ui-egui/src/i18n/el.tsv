@@ -2370,3 +2370,8 @@ animation effects	Off	Ανενεργά
 	Bring forward	Μεταφορά προς τα εμπρός
 	Send backward	Μεταφορά προς τα πίσω
 	Send to back	Μεταφορά στο παρασκήνιο
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Τοποθέτηση στη σελίδα
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Τα σχόλια βρίσκονται πάντα μπροστά από το κείμενο και τις εικόνες της σελίδας. Όταν τοποθετηθεί στη σελίδα, αυτό γίνεται εικόνα που μπορείτε να μετακινήσετε, να αλλάξετε μέγεθος και να στείλετε πίσω· δεν είναι πλέον σχόλιο.
+	Pasted image	Επικολλημένη εικόνα
+	Couldn't paste the image: {e}	Δεν ήταν δυνατή η επικόλληση της εικόνας: {e}

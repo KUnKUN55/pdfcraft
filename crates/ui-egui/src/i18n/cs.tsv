@@ -2434,3 +2434,8 @@ animation effects	Off	Vypnuto
 	Bring forward	Přenést blíž
 	Send backward	Odeslat dál
 	Send to back	Odeslat do pozadí
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Umístit na stránku
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Komentáře jsou vždy před textem a obrázky stránky. Po umístění na stránku se tento komentář stane obrázkem, který můžete přesouvat, měnit jeho velikost a posílat dozadu; už to nebude komentář.
+	Pasted image	Vložený obrázek
+	Couldn't paste the image: {e}	Obrázek nelze vložit: {e}

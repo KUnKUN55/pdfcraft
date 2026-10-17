@@ -1432,6 +1432,31 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 ui.ctx().copy_text(a.contents.clone().unwrap_or_default());
                 ui.close();
             }
+            // Arrange (Thai edition): among the page's comments, which are always drawn above its
+            // text and images; placed on the page, a comment can go behind them.
+            let layers: Vec<usize> = info
+                .annotations
+                .iter()
+                .filter(|x| x.page == page && pdfcraft_engine::arranged_comment(x.subtype.as_bytes(), x.in_reply_to.is_some()))
+                .map(|x| x.index)
+                .collect();
+            ui.add_enabled_ui(allowed, |ui| {
+                if let Some(how) = crate::content_ui::arrange_menu(ui, |how| pdfcraft_engine::arranged_position(&layers, index, how).is_some()) {
+                    if let Some(to) = pdfcraft_engine::arranged_position(&layers, index, how) {
+                        view.comments.selected = Some((page, to));
+                    }
+                    action = Some(CanvasAction::Edit(Box::new(Edit::ArrangeAnnotation { page, index, how })));
+                }
+            });
+            if ui
+                .add_enabled(allowed && !a.locked, egui::Button::new(tl!("Place on the page")))
+                .tip(tl!("Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment."))
+                .clicked()
+            {
+                view.comments.selected = None;
+                action = Some(CanvasAction::Edit(Box::new(Edit::CommentToContent { page, index })));
+                ui.close();
+            }
             ui.separator();
             if ui.add_enabled(allowed && !a.locked, egui::Button::new(tl!("Delete"))).clicked() {
                 view.comments.selected = None;

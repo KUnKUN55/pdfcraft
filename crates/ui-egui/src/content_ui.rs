@@ -487,12 +487,13 @@ const ARRANGE: [(Arrange, &str); 4] =
 
 /// The page's right-click menu over an added text box or image (Arrange, Delete): `true` when
 /// it was shown, so the page's other menus are not. Its choice becomes the pending edit.
-pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, added: &[Added]) -> bool {
+pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_engine::Document) -> bool {
     let Some((page, index)) = view.content.menu.filter(|m| view.content.selected == Some(*m) && view.content.draft.is_none()) else {
         return false;
     };
-    let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index) else { return false };
-    match item_menu(ui) {
+    let Some((_, a)) = on_page(&doc.added, page).into_iter().find(|(i, _)| *i == index) else { return false };
+    let layer = doc.added_layer(page, index);
+    match item_menu(ui, |how| arrange_moves(layer, how)) {
         Some(ItemChoice::Arrange(how)) => {
             view.content.follow = Some((page, a.obj));
             view.pending_edit = Some(Edit::ArrangeContent { page, index, how });
@@ -506,8 +507,16 @@ pub(crate) fn page_menu(ui: &mut egui::Ui, view: &mut DocView, added: &[Added]) 
     true
 }
 
-/// The right-click menu of an added text box or image: Arrange and Delete.
-fn item_menu(ui: &mut egui::Ui) -> Option<ItemChoice> {
+/// Whether `how` moves an item at `layer` (its layer, and how many the page has).
+pub(crate) fn arrange_moves(layer: Option<(usize, usize)>, how: Arrange) -> bool {
+    layer.is_some_and(|(at, count)| match how {
+        Arrange::Front | Arrange::Forward => at + 1 < count,
+        Arrange::Backward | Arrange::Back => at > 0,
+    })
+}
+
+/// The Arrange submenu: the four orders, those that would move nothing greyed out.
+pub(crate) fn arrange_menu(ui: &mut egui::Ui, moves: impl Fn(Arrange) -> bool) -> Option<Arrange> {
     let mut chosen = None;
     ui.menu_button(tl!("Arrange"), |ui| {
         for (how, keys) in ARRANGE {
@@ -517,12 +526,18 @@ fn item_menu(ui: &mut egui::Ui) -> Option<ItemChoice> {
                 Arrange::Backward => tl!("Send backward"),
                 Arrange::Back => tl!("Send to back"),
             };
-            if ui.add(egui::Button::new(label).shortcut_text(keys)).clicked() {
-                chosen = Some(ItemChoice::Arrange(how));
+            if ui.add_enabled(moves(how), egui::Button::new(label).shortcut_text(keys)).clicked() {
+                chosen = Some(how);
                 ui.close();
             }
         }
     });
+    chosen
+}
+
+/// The right-click menu of an added text box or image: Arrange and Delete.
+fn item_menu(ui: &mut egui::Ui, moves: impl Fn(Arrange) -> bool) -> Option<ItemChoice> {
+    let mut chosen = arrange_menu(ui, moves).map(ItemChoice::Arrange);
     ui.separator();
     if ui.button(tl!("Delete")).clicked() {
         chosen = Some(ItemChoice::Delete);
@@ -591,7 +606,7 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
 }
 
 /// Delete removes the selected item; Escape clears the selection; the arrow keys move it.
-pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
+pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added], layer: Option<(usize, usize)>) {
     if view.content.selected.is_none() || view.content.draft.is_some() || ctx.egui_wants_keyboard_input() {
         return;
     }
@@ -600,6 +615,7 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, added: &[Added]) {
         view.pending_edit = Some(Edit::DeleteContent { page, index });
     } else if let Some(how) = arrange_key(ctx)
         && view.pending_edit.is_none()
+        && arrange_moves(layer, how)
         && let Some((page, index)) = view.content.selected
         && let Some((_, a)) = on_page(added, page).into_iter().find(|(i, _)| *i == index)
     {

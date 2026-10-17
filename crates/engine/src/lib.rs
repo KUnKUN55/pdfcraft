@@ -123,7 +123,7 @@ pub use pdfcraft_annot::appearance as annot_text;
 pub use pdfcraft_annot::links::{Highlight as LinkHighlight, LinkAction, LinkItem, LinkStyle};
 pub use pdfcraft_annot::{
     AppearanceCache, AttachIcon, FillMark, LineEnding, Markup, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, Props as CommentProps,
-    ReviewState, Rgb, Shape, StampGroup, StampKind, Style, rect_quad,
+    ReviewState, Rgb, Shape, StampGroup, StampKind, Style, arranged_comment, arranged_position, rect_quad,
 };
 pub use pdfcraft_forms::detect;
 pub use pdfcraft_optimize as optimize;
@@ -204,6 +204,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::AddAnnotation(_)
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
+        | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
         | Edit::SetAnnotationStatus { .. }
@@ -453,6 +454,12 @@ impl Document {
 
     /// Mixed editable objects on one page. Source inventories are zero-based and added items
     /// appear once. Rectangles are user-space points, independent of the viewer's zoom.
+    /// Where added item `index` of `page` is among the page's layers, and how many there are
+    /// (Thai edition: which Arrange moves change something).
+    pub fn added_layer(&self, page: usize, index: usize) -> Option<(usize, usize)> {
+        pdfcraft_edit::added_layer(&self.editor.as_ref()?.cos, page, index)
+    }
+
     pub fn editable_objects(&self, page: usize) -> Result<Vec<EditableObject>, String> {
         let editor = self.editor.as_ref().ok_or("the document can't be read")?;
         pdfcraft_edit::editable_objects(&editor.cos, page).map_err(|e| e.to_string())
@@ -1483,6 +1490,18 @@ pub enum Edit {
         index: usize,
         how: Arrange,
     },
+    /// Move a comment (`index` in the page's `/Annots`) among the page's comments (Thai edition).
+    ArrangeAnnotation {
+        page: usize,
+        index: usize,
+        how: Arrange,
+    },
+    /// Turn a comment into an added picture on the page, which Arrange can put behind text
+    /// (Thai edition).
+    CommentToContent {
+        page: usize,
+        index: usize,
+    },
     /// Replace an added image with another file (keeping its box and transforms).
     ReplaceImage {
         page: usize,
@@ -1857,7 +1876,8 @@ impl Edit {
             Edit::AddImage { .. } => Label::of("Add image"),
             Edit::UpdateContent { .. } => Label::of("Edit content"),
             Edit::DeleteContent { .. } => Label::of("Delete content"),
-            Edit::ArrangeContent { how, .. } => Label::of(match how {
+            Edit::CommentToContent { .. } => Label::of("Place on the page"),
+            Edit::ArrangeContent { how, .. } | Edit::ArrangeAnnotation { how, .. } => Label::of(match how {
                 Arrange::Front => "Bring to front",
                 Arrange::Forward => "Bring forward",
                 Arrange::Backward => "Send backward",
@@ -1955,6 +1975,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::AddAnnotation(_)
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
+        | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
         | Edit::SetAnnotationStatus { .. }
@@ -2000,6 +2021,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::UpdateContent { .. }
         | Edit::MoveObjects { .. }
         | Edit::DeleteContent { .. }
+        | Edit::CommentToContent { .. }
         | Edit::ArrangeContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::ClearRedactions
@@ -2406,6 +2428,12 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::DeleteContent { page, index } => pdfcraft_edit::delete_content(doc, *page, *index)?,
         Edit::ArrangeContent { page, index, how } => {
             pdfcraft_edit::arrange_content(doc, *page, *index, *how)?;
+        }
+        Edit::ArrangeAnnotation { page, index, how } => {
+            pdfcraft_annot::arrange_annotation(doc, *page, *index, *how)?;
+        }
+        Edit::CommentToContent { page, index } => {
+            pdfcraft_edit::comment_to_content(doc, *page, *index)?;
         }
         Edit::ReplaceImage { page, index, name, bytes } => {
             let item = pdfcraft_edit::list_added(doc).into_iter().filter(|a| a.page == *page).nth(*index);

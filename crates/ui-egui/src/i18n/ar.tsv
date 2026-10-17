@@ -2381,3 +2381,8 @@ animation effects	Off	معطّلة
 	Bring forward	إحضار للأمام
 	Send backward	إرسال للخلف
 	Send to back	إرسال إلى الخلفية
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	وضع على الصفحة
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	التعليقات دائمًا أمام نص الصفحة وصورها. عند وضعه على الصفحة يصبح هذا التعليق صورة يمكنك نقلها وتغيير حجمها وإرسالها للخلف، ولا يعود تعليقًا.
+	Pasted image	صورة ملصقة
+	Couldn't paste the image: {e}	تعذّر لصق الصورة: {e}

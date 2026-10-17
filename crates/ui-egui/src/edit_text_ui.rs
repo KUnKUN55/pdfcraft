@@ -544,7 +544,12 @@ pub(crate) fn image_input(
                     let y = if start.y < fixed.y { fixed.y - h } else { fixed.y };
                     Rect::from_min_size(Pos2::new(x, y), egui::vec2(w, h))
                 }
-                None => b.translate(p - start),
+                // Smart guides (Thai edition): the picture's centre snaps to the page's centre lines.
+                None => {
+                    let moved = b.translate(crate::content_ui::snap_to_centre(ui, xf.rect, b, p - start));
+                    crate::content_ui::paint_guides(painter, xf.rect, moved);
+                    moved
+                }
             };
             // Move/resize the full placement by the visible frame's change. The engine
             // transforms an isolated crop together with its image, preserving its contents.
@@ -692,7 +697,12 @@ pub(crate) fn page_input(
         let p = ui.input(|i| i.pointer.interact_pos()).unwrap_or(d.start);
         let dx = p.x - d.start.x;
         let preview = match d.grip {
-            Grip::Move => b.translate(p - d.start),
+            // Smart guides (Thai edition), as for pictures.
+            Grip::Move => {
+                let moved = b.translate(crate::content_ui::snap_to_centre(ui, xf.rect, b, p - d.start));
+                crate::content_ui::paint_guides(painter, xf.rect, moved);
+                moved
+            }
             Grip::Left => Rect::from_min_max(Pos2::new((b.left() + dx).min(b.right() - 12.0), b.min.y), b.max),
             Grip::Right => Rect::from_min_max(b.min, Pos2::new((b.right() + dx).max(b.left() + 12.0), b.max.y)),
         };

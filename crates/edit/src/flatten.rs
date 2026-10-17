@@ -308,3 +308,80 @@ fn prune_fields(doc: &mut Document, widgets: &HashSet<ObjRef>, on_page: Option<&
     }
     Ok(())
 }
+
+/// `a` then `b`, for row-vector affine matrices `[a b c d e f]`.
+fn then(a: [f64; 6], b: [f64; 6]) -> [f64; 6] {
+    [
+        a[0] * b[0] + a[1] * b[2],
+        a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2],
+        a[2] * b[1] + a[3] * b[3],
+        a[4] * b[0] + a[5] * b[2] + b[4],
+        a[4] * b[1] + a[5] * b[3] + b[5],
+    ]
+}
+
+fn invert(m: [f64; 6]) -> Option<[f64; 6]> {
+    let det = m[0] * m[3] - m[1] * m[2];
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let (a, b, c, d) = (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det);
+    Some([a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)])
+}
+
+/// Place comment `index` (its position in the page's `/Annots`) on the page as an added item
+/// (Thai edition): its appearance becomes a picture that Edit a PDF moves, resizes and arranges
+/// among the page's text and images, and the comment (with its pop-up and replies) goes away.
+/// Comments are always drawn above the page's content; this is how one goes behind text.
+/// Returns the new item's index among the page's added items.
+pub fn comment_to_content(doc: &mut Document, page: usize, index: usize) -> Result<usize, EditError> {
+    let all = page_list(doc);
+    check(&[page], all.len())?;
+    let p = &all[page];
+    let list = p.dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let entry = list.get(index).ok_or_else(|| EditError::Invalid(format!("page {} has no comment {}", page + 1, index + 1)))?;
+    let d = doc.resolve(entry).as_dict().cloned().ok_or_else(|| EditError::Invalid("the comment can't be read".into()))?;
+    if !pdfcraft_annot::arranged_comment(d.name(b"Subtype").unwrap_or_default(), d.get(b"IRT").is_some()) {
+        return Err(EditError::Invalid("only a comment drawn on the page can be placed on it".into()));
+    }
+    if let Some(c) = pdfcraft_fonts::undrawn_mark(&d) {
+        return Err(EditError::Invalid(format!(
+            "the comment shows ? in place of \"{}\" (U+{:04X}), which its font can't draw; change that text first",
+            c.escape_debug(),
+            u32::from(c)
+        )));
+    }
+    let ap = appearance(doc, &d).ok_or_else(|| EditError::Invalid("the comment has no appearance to place on the page".into()))?;
+    let Object::Stream(form) = (*doc.get(ap)).clone() else { return Err(EditError::Invalid("the comment's appearance can't be read".into())) };
+    let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4).ok_or_else(|| EditError::Invalid("the comment has no rectangle".into()))?;
+    let rect = [rect[0].min(rect[2]), rect[1].min(rect[3]), rect[0].max(rect[2]), rect[1].max(rect[3])];
+    let placed = placement(doc, &form.dict, rect).ok_or_else(|| EditError::Invalid("the comment's appearance is empty".into()))?;
+    let own =
+        nums(doc, form.dict.get(b"Matrix")).filter(|m| m.len() == 6).map_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], |m| [m[0], m[1], m[2], m[3], m[4], m[5]]);
+    // Appearance space → user space → display space (the added item's), then onto the unit
+    // square an added picture is drawn into.
+    let to_display = invert(p.view_matrix(doc)).ok_or_else(|| EditError::Invalid("the page's view can't be inverted".into()))?;
+    let user_to_display =
+        |x: f64, y: f64| (to_display[0] * x + to_display[2] * y + to_display[4], to_display[1] * x + to_display[3] * y + to_display[5]);
+    let corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[0], rect[3]), (rect[2], rect[3])].map(|(x, y)| user_to_display(x, y));
+    let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |(a, b), c| (a.min(c.0), b.max(c.0)));
+    let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |(a, b), c| (a.min(c.1), b.max(c.1)));
+    let (w, h) = (x1 - x0, y1 - y0);
+    if !(w.is_finite() && h.is_finite() && w >= 1.0 && h >= 1.0) {
+        return Err(EditError::Invalid("the comment is too small to place on the page".into()));
+    }
+    let unit = [1.0 / w, 0.0, 0.0, 1.0 / h, -x0 / w, -y0 / h];
+    let matrix = then(then(then(own, placed), to_display), unit);
+    let mut dict = form.dict.clone();
+    dict.set(b"Type".to_vec(), Object::name("XObject"));
+    dict.set(b"Subtype".to_vec(), Object::name("Form"));
+    dict.set(b"Matrix".to_vec(), Object::Array(matrix.iter().map(|v| Object::Real(*v)).collect()));
+    // A refusal below leaves the document as it was.
+    let mut work = doc.clone();
+    let xobject = work.add(Object::Stream(pdfcraft_cos::Stream { dict, ..form }));
+    pdfcraft_annot::delete_annotation(&mut work, page, index).map_err(|e| EditError::Invalid(e.to_string()))?;
+    let at = crate::add_content(&mut work, page, &crate::Content::Image(crate::AddedImage::new([x0, y0, x1, y1], xobject)))?;
+    *doc = work;
+    Ok(at)
+}

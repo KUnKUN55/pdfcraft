@@ -1496,6 +1496,80 @@ fn touch(d: &mut Dict, meta: &Meta) {
     }
 }
 
+/// Where an item goes among its page's layers (Acrobat's and Word's Arrange; Thai edition):
+/// comments among comments here, added text and images among page content in `pdfcraft_edit`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arrange {
+    /// In front of everything.
+    Front,
+    /// One layer up.
+    Forward,
+    /// One layer down.
+    Backward,
+    /// Behind everything.
+    Back,
+}
+
+/// Where `index` goes among `layers` (ascending positions of the items that take part, in
+/// drawing order): the position it is inserted at once it is taken out, or `None` when it is
+/// not one of them or is already there.
+pub fn arranged_position(layers: &[usize], index: usize, how: Arrange) -> Option<usize> {
+    let at = layers.iter().position(|&l| l == index)?;
+    let last = layers.len().checked_sub(1)?;
+    let to = match how {
+        Arrange::Front => last,
+        Arrange::Forward => (at + 1).min(last),
+        Arrange::Backward => at.saturating_sub(1),
+        Arrange::Back => 0,
+    };
+    if to == at {
+        return None;
+    }
+    // The position the target layer has once `index` is taken out of the list.
+    let target = *layers.get(to)?;
+    let target = if target > index { target - 1 } else { target };
+    Some(if to > at { target + 1 } else { target })
+}
+
+/// Whether an annotation is a comment drawn on the page, one Arrange moves: not a pop-up, reply,
+/// link or form field.
+pub fn arranged_comment(subtype: &[u8], reply: bool) -> bool {
+    !reply && !matches!(subtype, b"Popup" | b"Link" | b"Widget")
+}
+
+/// Arrange comment `index` of `page` among the page's other comments (Thai edition). Comments
+/// are always drawn above the page's content, so this orders them only among themselves.
+/// Returns its new index in `/Annots`.
+pub fn arrange_annotation(doc: &mut Document, page: usize, index: usize, how: Arrange) -> Result<usize, AnnotError> {
+    let p = page_ref(doc, page)?;
+    let mut list = annots(doc, p);
+    if index >= list.len() {
+        return Err(AnnotError::NoSuchAnnotation { page, index });
+    }
+    let layers: Vec<usize> = list
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            let d = doc.resolve(e);
+            d.as_dict().is_some_and(|d| arranged_comment(d.name(b"Subtype").unwrap_or_default(), d.get(b"IRT").is_some()))
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let to = arranged_position(&layers, index, how).ok_or_else(|| {
+        AnnotError::Invalid(
+            match how {
+                Arrange::Front | Arrange::Forward => "the comment is already in front of the other comments",
+                Arrange::Back | Arrange::Backward => "the comment is already behind the other comments",
+            }
+            .into(),
+        )
+    })?;
+    let entry = list.remove(index);
+    list.insert(to.min(list.len()), entry);
+    set_annots(doc, p, list)?;
+    Ok(to)
+}
+
 /// Delete a comment together with its pop-up and its replies (and theirs), as Acrobat does.
 pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Result<(), AnnotError> {
     let p = page_ref(doc, page)?;

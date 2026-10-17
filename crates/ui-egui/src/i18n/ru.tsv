@@ -2273,3 +2273,8 @@ animation effects	Off	Выкл
 	Bring forward	Переместить вперёд
 	Send backward	Переместить назад
 	Send to back	На задний план
+# Place a comment on the page; paste a picture (Thai edition).
+	Place on the page	Поместить на страницу
+	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Комментарии всегда находятся перед текстом и изображениями страницы. Помещённый на страницу, этот комментарий станет изображением, которое можно перемещать, масштабировать и переносить назад; комментарием он больше не будет.
+	Pasted image	Вставленное изображение
+	Couldn't paste the image: {e}	Не удалось вставить изображение: {e}

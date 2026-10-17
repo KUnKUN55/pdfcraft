@@ -2366,6 +2366,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     view.objects.prepare(doc, tool == QuickTool::EditText && can_modify, ui.ctx());
     view.text_background.prepare(ui.ctx(), doc, view.line_editor.as_ref(), scale);
     let added = doc.added.clone();
+    // The selected added item's layer, for the Arrange keys (Thai edition).
+    let selected_layer = view.content.selected.and_then(|(p, i)| doc.added_layer(p, i));
     let doc_links = if tool == QuickTool::Link { doc.links.clone() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);
@@ -3049,7 +3051,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
         resp.context_menu(|ui| {
             // An added text box or image right-clicked: Arrange and Delete (Thai edition).
-            if crate::content_ui::page_menu(ui, view, &doc.added) {
+            if crate::content_ui::page_menu(ui, view, doc) {
                 return;
             }
             // Preparing a form: the selected field's menu.
@@ -3299,7 +3301,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         crate::prepare::keys(ui.ctx(), view);
     }
     if editing_content {
-        crate::content_ui::keys(ui.ctx(), view, &added);
+        crate::content_ui::keys(ui.ctx(), view, &added, selected_layer);
     } else {
         // Outside Add content nothing shows the selection, so the arrow keys are the page's again.
         view.content.selected = None;
