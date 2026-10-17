@@ -2375,3 +2375,6 @@ animation effects	Off	Ανενεργά
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Τα σχόλια βρίσκονται πάντα μπροστά από το κείμενο και τις εικόνες της σελίδας. Όταν τοποθετηθεί στη σελίδα, αυτό γίνεται εικόνα που μπορείτε να μετακινήσετε, να αλλάξετε μέγεθος και να στείλετε πίσω· δεν είναι πλέον σχόλιο.
 	Pasted image	Επικολλημένη εικόνα
 	Couldn't paste the image: {e}	Δεν ήταν δυνατή η επικόλληση της εικόνας: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Επικόλληση σχολίου
+	The copied comment is no longer in the document	Το σχόλιο που αντιγράψατε δεν υπάρχει πλέον στο έγγραφο

@@ -123,7 +123,7 @@ pub use pdfcraft_annot::appearance as annot_text;
 pub use pdfcraft_annot::links::{Highlight as LinkHighlight, LinkAction, LinkItem, LinkStyle};
 pub use pdfcraft_annot::{
     AppearanceCache, AttachIcon, FillMark, LineEnding, Markup, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, Props as CommentProps,
-    ReviewState, Rgb, Shape, StampGroup, StampKind, Style, arranged_comment, arranged_position, rect_quad,
+    ReviewState, Rgb, Shape, StampGroup, StampKind, Style, arranged_comment, arranged_position, copyable_comment, rect_quad,
 };
 pub use pdfcraft_forms::detect;
 pub use pdfcraft_optimize as optimize;
@@ -204,6 +204,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::AddAnnotation(_)
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
+        | Edit::DuplicateAnnotation { .. }
         | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
@@ -1496,6 +1497,15 @@ pub enum Edit {
         index: usize,
         how: Arrange,
     },
+    /// Copy comment `index` of `page` onto `to_page`, moved by (`dx`, `dy`) points (Thai
+    /// edition: Copy and Paste, Ctrl+drag).
+    DuplicateAnnotation {
+        page: usize,
+        index: usize,
+        to_page: usize,
+        dx: f64,
+        dy: f64,
+    },
     /// Move a comment (`index` in the page's `/Annots`) among the page's comments (Thai edition).
     ArrangeAnnotation {
         page: usize,
@@ -1826,6 +1836,7 @@ impl Edit {
             Edit::AddAnnotation(a) => Label::of(add_annotation(&a.shape)),
             Edit::AddCustomStamp { .. } => Label::of("Add stamp"),
             Edit::DeleteAnnotation { .. } => Label::of("Delete comment"),
+            Edit::DuplicateAnnotation { .. } => Label::of("Paste comment"),
             Edit::SetAnnotationContents { .. } => Label::of("Edit comment"),
             Edit::ReplyToAnnotation { .. } => Label::of("Reply"),
             // The state's name is part of the wording: a language may need to agree it with the rest.
@@ -1992,6 +2003,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::AddAnnotation(_)
         | Edit::AddCustomStamp { .. }
         | Edit::DeleteAnnotation { .. }
+        | Edit::DuplicateAnnotation { .. }
         | Edit::ArrangeAnnotation { .. }
         | Edit::SetAnnotationContents { .. }
         | Edit::ReplyToAnnotation { .. }
@@ -2255,6 +2267,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::LockAnnotation { page, index, locked } => pdfcraft_annot::set_locked(doc, *page, *index, *locked)?,
         Edit::MoveAnnotation { page, index, dx, dy } => pdfcraft_annot::move_annotation(doc, *page, *index, *dx, *dy, &cx.meta())?,
+        Edit::DuplicateAnnotation { page, index, to_page, dx, dy } => {
+            pdfcraft_annot::duplicate_annotation(doc, *page, *index, *to_page, *dx, *dy, &cx.meta())?;
+        }
         Edit::ResizeAnnotation { page, index, rect } => pdfcraft_annot::set_rect(doc, *page, *index, *rect, &cx.meta())?,
         Edit::StyleAnnotation { page, index, color, opacity, width, endings } => {
             pdfcraft_annot::set_style(doc, *page, *index, *color, *opacity, *width, endings.as_deref(), &cx.meta())?;

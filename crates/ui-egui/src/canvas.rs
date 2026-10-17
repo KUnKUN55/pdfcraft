@@ -2355,6 +2355,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let mut canvas_action: Option<comments::CanvasAction> = None;
     let mut field_menu: Option<FieldMenu> = None;
     let mut open_props: Option<(usize, usize)> = None;
+    // Copy (page, index) or Paste of a comment from its menu (Thai edition).
+    let mut comment_clip: Option<Option<(usize, usize)>> = None;
+    let can_paste_comment = app.comment_clip.is_some();
     let mut field_props = false;
     let mut field_placed = false;
     let can_modify = doc.allows_modification();
@@ -3150,7 +3153,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     ui.separator();
                 }
             }
-            canvas_action = comments::context_menu(ui, view, info, prefs, allowed).or(copy_image);
+            canvas_action = comments::context_menu(ui, view, info, prefs, allowed, can_paste_comment).or(copy_image);
         });
         (wanted, visible_now)
     });
@@ -3341,6 +3344,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(comments::CanvasAction::Properties(p, i)) => open_props = Some((p, i)),
         Some(comments::CanvasAction::CopyImage(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::Copy(p, i)),
         Some(comments::CanvasAction::CopyImageFile(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::CopyFile(p, i)),
+        Some(comments::CanvasAction::CopyComment(p, i)) => comment_clip = Some(Some((p, i))),
+        Some(comments::CanvasAction::PasteComment) => comment_clip = Some(None),
         None => {}
     }
     match clicked_link {
@@ -3382,6 +3387,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     if let Some((p, i)) = open_props {
         app.open_comment_props(p, i);
+    }
+    match comment_clip {
+        Some(Some((p, i))) => {
+            app.copy_comment(index, p, i, ui.ctx());
+        }
+        Some(None) => app.paste_comment(index),
+        None => {}
     }
     if let Some((p, i)) = app.views[index].comments.default_request.take() {
         app.make_comment_default(p, i);

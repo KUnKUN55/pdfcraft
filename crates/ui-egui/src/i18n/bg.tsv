@@ -2328,3 +2328,6 @@ animation effects	Off	Изключени
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Коментарите винаги са пред текста и изображенията на страницата. Поставен на страницата, този коментар става изображение, което можете да местите, преоразмерявате и изпращате назад; вече не е коментар.
 	Pasted image	Поставено изображение
 	Couldn't paste the image: {e}	Изображението не може да бъде поставено: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Поставяне на коментар
+	The copied comment is no longer in the document	Копираният коментар вече не е в документа

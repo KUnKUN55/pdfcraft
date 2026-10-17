@@ -3719,3 +3719,74 @@ fn bring_to_front_takes_an_item_over_the_comments_covering_it() {
     let p = &pdfcraft_model::pages(&doc)[0];
     assert_eq!(doc.resolve(p.dict.get(b"Annots").unwrap()).as_array().unwrap().len(), 1, "the other comment stays");
 }
+
+/// Thai edition: every comment drawn on the page copies, onto its own page or another, moved by
+/// the offset, with its own appearance and id; text highlights don't.
+#[test]
+fn comments_copy_with_their_own_appearance_and_id() {
+    use pdfcraft_annot::{LineEnding as E, Markup, Meta, NewAnnotation, NoteIcon, Shape, StampKind, Style, add_annotation, duplicate_annotation};
+    let mut doc = fixture();
+    let shapes = vec![
+        Shape::Note { at: [100.0, 700.0], icon: NoteIcon::Comment },
+        Shape::Rectangle { rect: [100.0, 600.0, 200.0, 650.0] },
+        Shape::Oval { rect: [100.0, 500.0, 200.0, 550.0] },
+        Shape::Line { from: [100.0, 450.0], to: [200.0, 460.0], start: E::None, end: E::None },
+        Shape::Line { from: [100.0, 420.0], to: [200.0, 430.0], start: E::None, end: E::OpenArrow },
+        Shape::Ink { strokes: vec![vec![[100.0, 380.0], [150.0, 400.0], [200.0, 380.0]]] },
+        Shape::PolyLine { vertices: vec![[100.0, 330.0], [150.0, 350.0], [200.0, 330.0]], start: E::None, end: E::None },
+        Shape::Polygon { vertices: vec![[100.0, 260.0], [150.0, 300.0], [200.0, 260.0]], cloud: false },
+        Shape::Polygon { vertices: vec![[300.0, 260.0], [350.0, 300.0], [400.0, 260.0]], cloud: true },
+        Shape::TextBox { rect: [300.0, 600.0, 450.0, 650.0], font_size: 12.0 },
+        Shape::Callout { rect: [300.0, 500.0, 450.0, 550.0], knee: [280.0, 480.0], point: [250.0, 450.0], font_size: 12.0, ending: E::OpenArrow },
+        Shape::Stamp { rect: [300.0, 380.0, 450.0, 430.0], stamp: StampKind::Approved, by: None },
+    ];
+    let count = shapes.len();
+    for (i, shape) in shapes.into_iter().enumerate() {
+        let new = NewAnnotation { page: 0, shape, style: Style::default(), contents: "copy me".into(), author: "Now".into() };
+        add_annotation(&mut doc, &new, &Meta { id: format!("src{i}"), ..Meta::default() }).unwrap();
+    }
+    let annots = |doc: &Document, page: usize| -> Vec<pdfcraft_cos::Dict> {
+        let p = &pdfcraft_model::pages(doc)[page];
+        p.dict
+            .get(b"Annots")
+            .map(|a| doc.resolve(a).as_array().cloned().unwrap_or_default())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|e| doc.resolve(e).as_dict().cloned())
+            .collect()
+    };
+    let rect = |d: &pdfcraft_cos::Dict| -> Vec<f64> { d.get(b"Rect").unwrap().as_array().unwrap().iter().filter_map(Object::as_f64).collect() };
+    let originals = annots(&doc, 0).into_iter().filter(|d| d.name(b"Subtype") != Some(b"Popup")).count();
+    assert_eq!(originals, count);
+    let sources: Vec<usize> = annots(&doc, 0).iter().enumerate().filter(|(_, d)| d.name(b"Subtype") != Some(b"Popup")).map(|(i, _)| i).collect();
+    for (n, &i) in sources.iter().enumerate() {
+        // Every other one to page 3, the rest beside themselves.
+        let to = if n % 2 == 0 { 0 } else { 2 };
+        let at = duplicate_annotation(&mut doc, 0, i, to, 10.0, -5.0, &Meta { id: format!("copy{n}"), ..Meta::default() })
+            .unwrap_or_else(|e| panic!("{n}: {e}"));
+        let src = annots(&doc, 0)[i].clone();
+        let copy = annots(&doc, to)[at].clone();
+        assert_eq!(copy.name(b"Subtype"), src.name(b"Subtype"));
+        let (a, b) = (rect(&src), rect(&copy));
+        assert!((b[0] - a[0] - 10.0).abs() < 1e-6 && (b[1] - a[1] + 5.0).abs() < 1e-6, "{n} {:?}: {a:?} -> {b:?}", src.name(b"Subtype"));
+        assert_eq!(copy.get(b"NM").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some(format!("copy{n}").as_str()));
+        assert!(copy.get(b"Popup").is_none() && copy.get(b"IRT").is_none());
+        let ap = |d: &pdfcraft_cos::Dict| doc.resolve(d.get(b"AP").unwrap()).as_dict().unwrap().get(b"N").and_then(Object::as_ref);
+        if ap(&src).is_some() {
+            assert_ne!(ap(&src), ap(&copy), "{n}: its own appearance");
+        }
+        assert_eq!(copy.get(b"P").and_then(Object::as_ref), Some(pdfcraft_model::pages(&doc)[to].obj));
+    }
+    // A highlight stays with its text.
+    let hl = NewAnnotation {
+        page: 0,
+        shape: Shape::TextMarkup { kind: Markup::Highlight, quads: vec![[100.0, 120.0, 200.0, 120.0, 100.0, 100.0, 200.0, 100.0]] },
+        style: Style::default(),
+        contents: String::new(),
+        author: "Now".into(),
+    };
+    let i = add_annotation(&mut doc, &hl, &Meta { id: "hl".into(), ..Meta::default() }).unwrap();
+    assert!(duplicate_annotation(&mut doc, 0, i, 0, 10.0, 0.0, &Meta::default()).is_err());
+    let doc = reopen(&doc);
+    assert!(annots(&doc, 2).len() >= count / 2);
+}

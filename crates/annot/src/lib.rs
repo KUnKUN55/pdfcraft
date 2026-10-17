@@ -1570,6 +1570,79 @@ pub fn arrange_annotation(doc: &mut Document, page: usize, index: usize, how: Ar
     Ok(to)
 }
 
+/// Whether a comment can be copied ([`duplicate_annotation`]): one drawn on the page that is not
+/// a text highlight, underline, strikeout or squiggle (those belong to the text under them).
+pub fn copyable_comment(subtype: &[u8], reply: bool) -> bool {
+    arranged_comment(subtype, reply) && !matches!(subtype, b"Highlight" | b"Underline" | b"StrikeOut" | b"Squiggly")
+}
+
+/// Copy comment `index` of `page` onto page `to_page`, moved by (`dx`, `dy`) points (Thai
+/// edition: Copy and Paste, Ctrl+drag). The copy has its own appearance streams, a new `/NM`,
+/// no pop-up and no replies, and is not locked. Returns its index in `to_page`'s `/Annots`.
+pub fn duplicate_annotation(
+    doc: &mut Document,
+    page: usize,
+    index: usize,
+    to_page: usize,
+    dx: f64,
+    dy: f64,
+    meta: &Meta,
+) -> Result<usize, AnnotError> {
+    if !finite(&[dx, dy]) {
+        return Err(AnnotError::Invalid("invalid offset".into()));
+    }
+    let (_, r) = annot_ref(doc, page, index)?;
+    let d = annot_dict(doc, r);
+    if !copyable_comment(d.name(b"Subtype").unwrap_or_default(), d.get(b"IRT").is_some()) {
+        return Err(AnnotError::Invalid("this comment can't be copied".into()));
+    }
+    let target = page_ref(doc, to_page)?;
+    let mut copy = d.clone();
+    for k in [&b"Popup"[..], b"Parent", b"IRT", b"RT", b"StructParent"] {
+        copy.remove(k);
+    }
+    copy.set(b"P".to_vec(), Object::Ref(target));
+    if !meta.id.is_empty() {
+        copy.set(b"NM".to_vec(), PdfString::text(&meta.id));
+    }
+    if let Some(f) = copy.get(b"F").and_then(Object::as_int) {
+        copy.set(b"F".to_vec(), Object::Int(f & !FLAG_LOCKED));
+    }
+    // Its own appearances, so restyling one never changes the other.
+    if let Some(ap) = copy.get(b"AP").and_then(|a| doc.resolve(a).as_dict().cloned()) {
+        let mut own = Dict::new();
+        for (key, entry) in ap.iter() {
+            let copied = match doc.resolve(entry).as_ref() {
+                Object::Stream(s) => Object::Ref(doc.add(Object::Stream(s.clone()))),
+                Object::Dict(states) => {
+                    let mut out = Dict::new();
+                    for (state, o) in states.iter() {
+                        let o = match doc.resolve(o).as_ref() {
+                            Object::Stream(s) => Object::Ref(doc.add(Object::Stream(s.clone()))),
+                            other => other.clone(),
+                        };
+                        out.set(state.clone(), o);
+                    }
+                    Object::Dict(out)
+                }
+                other => other.clone(),
+            };
+            own.set(key.clone(), copied);
+        }
+        copy.set(b"AP".to_vec(), Object::Dict(own));
+    }
+    touch(&mut copy, meta);
+    let new = doc.add(Object::Dict(copy));
+    let mut list = annots(doc, target);
+    list.push(Object::Ref(new));
+    let at = list.len() - 1;
+    set_annots(doc, target, list)?;
+    if dx != 0.0 || dy != 0.0 {
+        move_annotation(doc, to_page, at, dx, dy, meta)?;
+    }
+    Ok(at)
+}
+
 /// Delete a comment together with its pop-up and its replies (and theirs), as Acrobat does.
 pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Result<(), AnnotError> {
     let p = page_ref(doc, page)?;

@@ -2361,3 +2361,6 @@ animation effects	Off	Kapalı
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Yorumlar her zaman sayfanın metninin ve resimlerinin önündedir. Sayfaya yerleştirildiğinde bu yorum taşıyabileceğiniz, boyutlandırabileceğiniz ve arkaya gönderebileceğiniz bir resme dönüşür; artık yorum değildir.
 	Pasted image	Yapıştırılan resim
 	Couldn't paste the image: {e}	Resim yapıştırılamadı: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Yorumu yapıştır
+	The copied comment is no longer in the document	Kopyalanan yorum artık belgede değil

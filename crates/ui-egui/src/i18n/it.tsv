@@ -2374,3 +2374,6 @@ animation effects	Off	Disattivati
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	I commenti stanno sempre davanti al testo e alle immagini della pagina. Posizionato sulla pagina, questo diventa un'immagine che puoi spostare, ridimensionare e portare dietro; non è più un commento.
 	Pasted image	Immagine incollata
 	Couldn't paste the image: {e}	Impossibile incollare l'immagine: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Incolla commento
+	The copied comment is no longer in the document	Il commento copiato non è più nel documento

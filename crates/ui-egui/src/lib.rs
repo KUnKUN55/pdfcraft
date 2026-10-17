@@ -384,6 +384,18 @@ pub struct TextClip {
 /// How far each paste of a copied text box is offset from the last, in points.
 pub(crate) const PASTE_STEP: f64 = 12.0;
 
+/// A comment copied with ⌘C (Thai edition): where it is, and the text put on the system clipboard
+/// with it, by which ⌘V knows the clipboard still holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommentClip {
+    pub page: usize,
+    pub index: usize,
+    /// Its `/NM`, which finds it again after other comments were added or deleted.
+    pub name: Option<String>,
+    pub marker: String,
+    pub pastes: u32,
+}
+
 /// Files delivered asynchronously: (name, bytes).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -713,6 +725,8 @@ pub struct PdfCraftApp {
     /// A text box or paragraph copied with ⌘C in Edit a PDF, ready to paste as a new text box
     /// (Thai edition).
     pub text_clipboard: Option<TextClip>,
+    /// A comment copied with ⌘C, ready to paste (Thai edition).
+    pub comment_clip: Option<CommentClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
     grid_drop: Option<GridDrop>,
     /// The last snapshot (width, height, RGBA); `system_clipboard` also puts it on the
@@ -1011,6 +1025,7 @@ impl PdfCraftApp {
             progress_notice: None,
             page_clipboard: None,
             text_clipboard: None,
+            comment_clip: None,
             grid_drop: None,
             last_snapshot: None,
             last_copied_image: None,
@@ -2786,6 +2801,10 @@ impl PdfCraftApp {
             return;
         }
         if let Some(text) = paste {
+            if self.comment_clip.as_ref().is_some_and(|c| c.marker == text) {
+                self.paste_comment(i);
+                return;
+            }
             self.paste_text_box(i, &text);
         } else if self.dialog.is_none() && !self.palette_open && image_paste_key(ctx) {
             // ⌘V with a picture on the clipboard (Thai edition): egui sends no Paste for one.
@@ -2795,6 +2814,11 @@ impl PdfCraftApp {
             return;
         }
         let Some(id) = self.views.get(i).map(|v| v.id) else { return };
+        if let Some((page, index)) = self.views.get(i).and_then(|v| v.comments.selected)
+            && self.copy_comment(i, page, index, ctx)
+        {
+            return;
+        }
         if let Some(clip) = self.text_box_to_copy(i) {
             if self.may_copy(id) {
                 ctx.copy_text(clip.text.text.clone());
@@ -2859,6 +2883,53 @@ impl PdfCraftApp {
             Some(Ok((name, bytes))) => self.add_image(name, bytes),
             Some(Err(e)) => self.notify_fmt("Couldn't paste the image: {e}", &[("e", &e)]),
             None => {}
+        }
+    }
+
+    /// Copy comment `index` of `page` (⌘C, or Copy in its menu) to paste with ⌘V. `false` when it
+    /// can't be copied (a text highlight, a reply, a link).
+    pub(crate) fn copy_comment(&mut self, i: usize, page: usize, index: usize, ctx: &egui::Context) -> bool {
+        let Some(doc) = self.views.get(i).and_then(|v| self.session.get(v.id)) else { return false };
+        let Some(a) = doc.info.annotations.iter().find(|a| a.page == page && a.index == index) else { return false };
+        if !pdfcraft_engine::copyable_comment(a.subtype.as_bytes(), a.in_reply_to.is_some()) {
+            return false;
+        }
+        // The comment's text goes to the clipboard as well, for pasting elsewhere; ⌘V here knows
+        // the clipboard still holds this comment by it.
+        // (Line breaks as a paste delivers them, so the two compare equal.)
+        let marker = a.contents.clone().filter(|c| !c.trim().is_empty()).unwrap_or_else(|| format!("[{}]", a.subtype)).replace("\r\n", "\n");
+        ctx.copy_text(marker.clone());
+        self.comment_clip = Some(CommentClip { page, index, name: a.name.clone(), marker, pastes: 0 });
+        true
+    }
+
+    /// ⌘V with a copied comment on the clipboard: a copy on the current page, a step down and right
+    /// of the last one on its own page, where it was on another; the copy is selected.
+    pub(crate) fn paste_comment(&mut self, i: usize) {
+        let Some(clip) = self.comment_clip.clone() else { return };
+        let Some(view) = self.views.get(i) else { return };
+        let to_page = view.current;
+        let Some(doc) = self.session.get(view.id) else { return };
+        let source = match &clip.name {
+            Some(name) => doc.info.annotations.iter().find(|a| a.page == clip.page && a.name.as_ref() == Some(name)).map(|a| a.index),
+            None => Some(clip.index),
+        };
+        let Some(index) = source else {
+            self.notify_tr("The copied comment is no longer in the document");
+            return;
+        };
+        let steps = if to_page == clip.page { clip.pastes.saturating_add(1) } else { clip.pastes };
+        let shift = PASTE_STEP * f64::from(steps.min(40));
+        if self.apply_edit(pdfcraft_engine::Edit::DuplicateAnnotation { page: clip.page, index, to_page, dx: shift, dy: -shift }) {
+            if let Some(c) = self.comment_clip.as_mut() {
+                c.pastes = c.pastes.saturating_add(1);
+            }
+            // The copy is the page's last annotation.
+            let newest =
+                self.session.get(self.views[i].id).and_then(|d| d.info.annotations.iter().filter(|a| a.page == to_page).map(|a| a.index).max());
+            if let Some(newest) = newest {
+                self.views[i].comments.selected = Some((to_page, newest));
+            }
         }
     }
 

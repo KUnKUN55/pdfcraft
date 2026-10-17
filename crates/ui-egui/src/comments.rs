@@ -931,6 +931,9 @@ fn select_input(
     if matches!(cv.gesture, Some(Gesture::Move { page, .. } | Gesture::Resize { page, .. }) if page == cx.page) {
         consumed = true;
     }
+    if matches!(cv.gesture, Some(Gesture::Move { page, .. }) if page == cx.page) && ui.input(|i| i.modifiers.command) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
+    }
     if resp.drag_stopped()
         && let Some(p) = pointer
     {
@@ -939,8 +942,15 @@ fn select_input(
                 cv.gesture = None;
                 let (a, b) = (cx.to_user(from), cx.to_user(p));
                 let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                // Ctrl held as it is dropped leaves it where it was and drops a copy (Thai edition).
+                let copying = ui.input(|i| i.modifiers.command)
+                    && cx.get(index).is_some_and(|a| pdfcraft_engine::copyable_comment(a.subtype.as_bytes(), a.in_reply_to.is_some()));
                 if from.distance(p) >= 2.0 {
-                    view.pending_edit = Some(Edit::MoveAnnotation { page, index, dx, dy });
+                    view.pending_edit = Some(if copying {
+                        Edit::DuplicateAnnotation { page, index, to_page: page, dx, dy }
+                    } else {
+                        Edit::MoveAnnotation { page, index, dx, dy }
+                    });
                 }
             }
             Some(Gesture::Resize { page, index, handle, from, aspect_ratio }) if page == cx.page => {
@@ -1377,7 +1387,14 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, tool: &mut QuickTool
 }
 
 /// Items of the canvas context menu for the selected comment (or the page).
-pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo, prefs: &CommentPrefs, allowed: bool) -> Option<CanvasAction> {
+pub(crate) fn context_menu(
+    ui: &mut egui::Ui,
+    view: &mut DocView,
+    info: &DocInfo,
+    prefs: &CommentPrefs,
+    allowed: bool,
+    can_paste: bool,
+) -> Option<CanvasAction> {
     let mut action = None;
     let selected = view.comments.selected.and_then(|(p, i)| info.annotations.iter().find(|a| a.page == p && a.index == i && a.in_reply_to.is_none()));
     match selected {
@@ -1426,6 +1443,12 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
             let marked = crate::comments_panel::is_marked(&thread);
             if ui.add_enabled(allowed, egui::Button::new(tl!(if marked { "Remove checkmark" } else { "Mark with checkmark" }))).clicked() {
                 action = Some(CanvasAction::Edit(Box::new(Edit::MarkAnnotation { page, index, marked: !marked, author: prefs.author.clone() })));
+                ui.close();
+            }
+            // Copy (Thai edition): the comment itself, to paste with ⌘V.
+            let copyable = pdfcraft_engine::copyable_comment(a.subtype.as_bytes(), a.in_reply_to.is_some());
+            if ui.add_enabled(copyable, egui::Button::new(tl!("Copy")).shortcut_text("Ctrl+C")).clicked() {
+                action = Some(CanvasAction::CopyComment(page, index));
                 ui.close();
             }
             if ui.button(tl!("Copy text")).clicked() {
@@ -1492,6 +1515,10 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 view.comments.composer = Some(Composer { page, at, kind: ComposerKind::Note, text: String::new(), focus: true });
                 ui.close();
             }
+            if can_paste && ui.add_enabled(allowed, egui::Button::new(tl!("Paste comment")).shortcut_text("Ctrl+V")).clicked() {
+                action = Some(CanvasAction::PasteComment);
+                ui.close();
+            }
             if ui.button(tl!("Comments panel")).clicked() {
                 action = Some(CanvasAction::OpenComments);
                 ui.close();
@@ -1512,6 +1539,10 @@ pub enum CanvasAction {
     CopyImage(usize, usize),
     /// Copy Image in Original Format: the same image as a file (JPEG as stored, else PNG).
     CopyImageFile(usize, usize),
+    /// Copy comment (page, index) to paste (Thai edition).
+    CopyComment(usize, usize),
+    /// Paste the copied comment on the current page.
+    PasteComment,
 }
 
 /// How many custom colours the "Recent colours" row keeps.

@@ -2329,3 +2329,6 @@ animation effects	Off	关
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	注释始终位于页面文字和图像的前面。放到页面上后，此注释将变为可以移动、调整大小并置于底层的图片，不再是注释。
 	Pasted image	粘贴的图像
 	Couldn't paste the image: {e}	无法粘贴图像：{e}
+# Copy and paste comments (Thai edition).
+	Paste comment	粘贴注释
+	The copied comment is no longer in the document	复制的注释已不在文档中

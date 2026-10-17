@@ -2366,3 +2366,6 @@ animation effects	Off	Aus
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Kommentare liegen immer vor dem Text und den Bildern der Seite. Auf der Seite platziert, wird dieser zu einem Bild, das Sie verschieben, skalieren und nach hinten stellen können; er ist dann kein Kommentar mehr.
 	Pasted image	Eingefügtes Bild
 	Couldn't paste the image: {e}	Das Bild konnte nicht eingefügt werden: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Kommentar einfügen
+	The copied comment is no longer in the document	Der kopierte Kommentar ist nicht mehr im Dokument

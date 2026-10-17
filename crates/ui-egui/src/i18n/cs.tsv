@@ -2439,3 +2439,6 @@ animation effects	Off	Vypnuto
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Komentáře jsou vždy před textem a obrázky stránky. Po umístění na stránku se tento komentář stane obrázkem, který můžete přesouvat, měnit jeho velikost a posílat dozadu; už to nebude komentář.
 	Pasted image	Vložený obrázek
 	Couldn't paste the image: {e}	Obrázek nelze vložit: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Vložit komentář
+	The copied comment is no longer in the document	Zkopírovaný komentář už v dokumentu není

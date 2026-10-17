@@ -2278,3 +2278,6 @@ animation effects	Off	Выкл
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Комментарии всегда находятся перед текстом и изображениями страницы. Помещённый на страницу, этот комментарий станет изображением, которое можно перемещать, масштабировать и переносить назад; комментарием он больше не будет.
 	Pasted image	Вставленное изображение
 	Couldn't paste the image: {e}	Не удалось вставить изображение: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	Вставить комментарий
+	The copied comment is no longer in the document	Скопированного комментария больше нет в документе

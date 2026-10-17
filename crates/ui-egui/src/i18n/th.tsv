@@ -2609,3 +2609,6 @@ key	Space	Space
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	ความคิดเห็นจะอยู่หน้าข้อความและรูปภาพของหน้าเสมอ เมื่อวางลงบนหน้าแล้ว ความคิดเห็นนี้จะกลายเป็นรูปภาพที่ย้าย ปรับขนาด และส่งไปไว้ข้างหลังได้ และจะไม่เป็นความคิดเห็นอีกต่อไป
 	Pasted image	รูปภาพที่วาง
 	Couldn't paste the image: {e}	วางรูปภาพไม่ได้: {e}
+# Copy and paste comments (Thai edition).
+	Paste comment	วางความคิดเห็น
+	The copied comment is no longer in the document	ความคิดเห็นที่คัดลอกไว้ไม่อยู่ในเอกสารแล้ว
