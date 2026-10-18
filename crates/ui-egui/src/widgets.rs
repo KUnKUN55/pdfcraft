@@ -344,7 +344,7 @@ pub fn section_title(ui: &mut egui::Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
     // Section titles across every panel go through here, so one translation point covers them.
-    ui.label(egui::RichText::new(tl!(text).to_uppercase()).font(theme::semibold(10.5)).color(t.text_faint).extra_letter_spacing(0.6));
+    ui.label(egui::RichText::new(crate::i18n::upper_label(text)).font(theme::semibold(10.5)).color(t.text_faint).extra_letter_spacing(0.6));
     ui.add_space(2.0);
 }
 
@@ -573,6 +573,9 @@ pub fn progress_notice(app: &PdfCraftApp, ctx: &egui::Context) -> bool {
 
 /// Buttons for every community link (`pdfcraft_engine::links`), Discord first and prominent.
 /// Returns the registry command of the one clicked.
+// Thai edition: the links lead to the upstream community, which doesn't support this edition, so
+// nothing shows them; kept so merges from upstream stay simple.
+#[allow(dead_code)]
 pub fn community_links(ui: &mut egui::Ui) -> Option<&'static str> {
     let mut clicked = None;
     ui.horizontal_wrapped(|ui| {
