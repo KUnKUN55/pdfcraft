@@ -2698,3 +2698,6 @@ key	Space	Space
 	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” ถูกเปลี่ยนบนดิสก์หลังจากเปิดหรือบันทึกครั้งล่าสุด การบันทึกตอนนี้จะแทนที่ฉบับที่ใหม่กว่านั้นด้วยฉบับนี้
 @id	file.word_count	นับคำ…
 theme	Appearance	ลักษณะที่ปรากฏ
+
+# Upstream labels added after 0.9.0 (merged from upstream main).
+	Zoom — type a percentage and press Enter	ย่อ/ขยาย — พิมพ์เปอร์เซ็นต์แล้วกด Enter
